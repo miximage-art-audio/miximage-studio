@@ -8,7 +8,6 @@ import { TopBar, WorkspaceTab } from './components/TopBar';
 import {
   DspAnalysisResult,
   analyzeAudioSamples,
-  encodeWav,
   generateDemoBassTrack,
 } from './engine/dsp';
 import {
@@ -74,7 +73,7 @@ export default function App() {
   // Audio + DSP Data
   const [audioSamples, setAudioSamples] = useState<Float32Array | null>(null);
   const [audioSampleRate, setAudioSampleRate] = useState<number>(44100);
-  const [audioBlobForRender, setAudioBlobForRender] = useState<Blob | null>(null);
+  const [audioBufferForRender, setAudioBufferForRender] = useState<AudioBuffer | null>(null);
   const [dspResult, setDspResult] = useState<DspAnalysisResult | null>(null);
 
   // Playback UI State
@@ -151,6 +150,7 @@ export default function App() {
   // 4. Load deterministic Demo Bass Track on initial mount
   const loadDemoAudio = useCallback(() => {
     stopAudioSource();
+    setAudioBufferForRender(null);
     setIsPlaying(false);
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0.48;
@@ -161,13 +161,10 @@ export default function App() {
     setTimeout(() => {
       const sr = 44100;
       const samples = generateDemoBassTrack(16, sr);
-      const wavBytes = encodeWav(samples, sr);
-      const wavBlob = new Blob([wavBytes.buffer as ArrayBuffer], { type: 'audio/wav' });
 
       audioBufferRef.current = null; // Will be hydrated lazily on Play via AudioContext
       setAudioSamples(samples);
       setAudioSampleRate(sr);
-      setAudioBlobForRender(wavBlob);
       setAudioName('Demo Bass Track (128 BPM · 16s)');
       setIsDemoAudio(true);
       setIsAnalyzing(false);
@@ -417,6 +414,7 @@ export default function App() {
 
   const handleUploadAudio = async (file: File) => {
     stopAudioSource();
+    setAudioBufferForRender(null);
     setIsPlaying(false);
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0;
@@ -456,9 +454,9 @@ export default function App() {
 
       const mono = mixAudioBufferToMono(decodedBuffer);
       audioBufferRef.current = decodedBuffer;
+      setAudioBufferForRender(decodedBuffer);
       setAudioSamples(mono);
       setAudioSampleRate(decodedBuffer.sampleRate);
-      setAudioBlobForRender(file);
       setAudioName(file.name);
       setIsDemoAudio(false);
     } catch (err) {
@@ -560,9 +558,8 @@ export default function App() {
         onClose={() => setIsRenderModalOpen(false)}
         imageEl={loadedImage}
         audioSamples={audioSamples}
+        audioBuffer={audioBufferForRender}
         audioSampleRate={audioSampleRate}
-        audioWavOrFile={audioBlobForRender}
-        audioFilename={audioName}
         cachedDsp={dspResult}
         ratio={ratio}
         fitMode={fitMode}
