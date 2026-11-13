@@ -151,7 +151,7 @@ export const ArchitectureGuideView: React.FC<ArchitectureGuideViewProps> = ({
             แบบ Additive Blending 2 ชั้นเพื่อให้เกิดแสงฟุ้งเรืองแสงระดับสตูดิโอ
           </p>
           <p className="text-xs text-slate-400">
-            เลือกได้ 3 สไตล์ (neon_bars, smooth_wave, circular_core) และ 4 โทนสี
+            เลือกได้ 15 สไตล์ (แท่ง 3D อีควอ และคลื่นแนวนอนหลากรูปแบบ) และ 4 โทนสี
           </p>
         </article>
       </div>

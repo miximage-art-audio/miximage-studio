@@ -1,17 +1,20 @@
-import midnightSynth from '../assets/images/artwork_midnight_synth_1794603085399.jpg';
-import vinylEclipse from '../assets/images/artwork_vinyl_eclipse_1794603085426.jpg';
-import tokyoRain from '../assets/images/artwork_tokyo_rain_1794603085551.jpg';
-
 export type AspectRatioKey = '1:1' | '2:3' | '3:2' | '4:5' | '5:4' | '16:9' | '9:16';
 export type WaveformStyle =
-  | 'neon_bars'
-  | 'smooth_wave'
-  | 'circular_core'
-  | 'mirror_horizon'
-  | 'pulse_rings'
-  | 'particle_burst'
-  | 'dual_ribbon'
-  | 'matrix_blocks';
+  | 'bars_3d'
+  | 'layered_fluid'
+  | 'dot_halftone'
+  | 'pixel_grid'
+  | 'mesh_ribbon'
+  | 'smooth_osc'
+  | 'mirror_needles'
+  | 'silk_aura'
+  | 'prism_peaks'
+  | 'brush_spectrum'
+  | 'harmonic_waves'
+  | 'dot_mountains'
+  | 'double_flame'
+  | 'triple_sine'
+  | 'seismic_line';
 export type ColorThemeKey = 'cyberpunk' | 'gold_fire' | 'ice_blue' | 'emerald';
 export type FitMode = 'cover' | 'blur_pad';
 export type FpsOption = 30 | 60;
@@ -23,18 +26,10 @@ export interface WaveformLayoutConfig {
   opacity: number; // 0.00 .. 1.00 (1.00 = opaque)
 }
 
-export function isRadialWaveformStyle(style: WaveformStyle): boolean {
-  return (
-    style === 'circular_core' ||
-    style === 'pulse_rings' ||
-    style === 'particle_burst'
-  );
-}
-
-export function getDefaultWaveformLayout(style: WaveformStyle): WaveformLayoutConfig {
+export function getDefaultWaveformLayout(_style?: WaveformStyle): WaveformLayoutConfig {
   return {
     posX: 0.5,
-    posY: isRadialWaveformStyle(style) ? 0.5 : 0.82,
+    posY: 0.80,
     scale: 1.0,
     opacity: 1.0,
   };
@@ -164,44 +159,79 @@ export const WAVEFORM_STYLES: Array<{
   description: string;
 }> = [
   {
-    key: 'neon_bars',
-    label: 'แท่งนีออนสมมาตร',
-    description: 'สเปกตรัม 64 ย่าน ขยับขึ้น 100% สะท้อนล่าง 35%',
+    key: 'bars_3d',
+    label: 'แท่ง 3D อีควอ',
+    description: 'แท่งสเปกตรัม 3 มิติพร้อมสันนูนและเงาสะท้อนนุ่มนวล',
   },
   {
-    key: 'smooth_wave',
-    label: 'คลื่นน้ำไหลต่อเนื่อง',
-    description: 'เส้นโค้งมนไล่เฉดสีโปร่งแสง พริ้วไหวทันสมัย',
+    key: 'layered_fluid',
+    label: 'คลื่นชั้นฟลูอิด',
+    description: 'คลื่นฟลูอิดซ้อน 3 ชั้นไล่เฉดสีนุ่มนวล',
   },
   {
-    key: 'circular_core',
-    label: 'วงแหวนพลังงาน 360°',
-    description: 'วงแหวนแผ่รัศมีขยายหดตามแรงกระแทกเบส',
+    key: 'dot_halftone',
+    label: 'จุดแฮฟโทน',
+    description: 'แท่งคลื่นจุดสมมาตรไล่ความเข้มจากแกนกลาง',
   },
   {
-    key: 'mirror_horizon',
-    label: 'เส้นขอบฟ้าสมมาตร',
-    description: 'คลื่นสมมาตรบน-ล่างเท่ากันจากเส้นแกนกลางเรืองแสง',
+    key: 'pixel_grid',
+    label: 'บล็อก LED 3D',
+    description: 'บล็อกพิกเซลสมมาตรสไตล์สตูดิโอ 3 มิติ',
   },
   {
-    key: 'pulse_rings',
-    label: 'คลื่นวงแหวนซ้อน 3 ชั้น',
-    description: 'วงแหวนหลายชั้นสั่นพ้องตามย่านเบส กลาง และแหลม',
+    key: 'mesh_ribbon',
+    label: 'ตาข่ายริบบิ้น 3D',
+    description: 'เส้นตาข่ายอนุภาค 3 มิติบิดเกลียวพริ้วไหว',
   },
   {
-    key: 'particle_burst',
-    label: 'ประกายดาวกระจาย',
-    description: 'กลุ่มอนุภาคพลังงานพุ่งกระจาย 360° ตามจังหวะสเปกตรัม',
+    key: 'smooth_osc',
+    label: 'เส้นคลื่นนุ่ม',
+    description: 'เส้นโค้งความถี่ไหลลื่นต่อเนื่อง',
   },
   {
-    key: 'dual_ribbon',
-    label: 'ริบบิ้นคลื่นคู่',
-    description: 'เส้นริบบิ้นคู่สลับเฟสไขว้กันแบบโมเดิร์น',
+    key: 'mirror_needles',
+    label: 'เข็มสมมาตร',
+    description: 'เข็มความถี่ละเอียดสมมาตรบน-ล่างคมชัด',
   },
   {
-    key: 'matrix_blocks',
-    label: 'บล็อกดิจิทัล LED',
-    description: 'แถบไฟ LED แบ่งบล็อกสไตล์มิกเซอร์สตูดิโอ',
+    key: 'silk_aura',
+    label: 'ม่านแสงซิลค์',
+    description: 'ม่านเส้นแสงฟุ้งนุ่มนวลไล่ขอบโปร่งแสง',
+  },
+  {
+    key: 'prism_peaks',
+    label: 'พีระมิดคลื่น',
+    description: 'คลื่นทรงผลึกโปร่งแสงซ้อนทับสมมาตร',
+  },
+  {
+    key: 'brush_spectrum',
+    label: 'พู่กันความถี่',
+    description: 'แถบความถี่ลายพู่กันละเอียดไล่ปลายเรียว',
+  },
+  {
+    key: 'harmonic_waves',
+    label: 'คลื่นฮาร์มอนิก',
+    description: 'ริบบิ้นฮาร์มอนิกซ้อนหลายชั้นพร้อมขอบเรืองแสง',
+  },
+  {
+    key: 'dot_mountains',
+    label: 'ภูเขาจุด 3D',
+    description: 'สันเขาจุด 3 มิติไต่ระดับตามสเปกตรัมความถี่',
+  },
+  {
+    key: 'double_flame',
+    label: 'เปลวสมมาตร',
+    description: 'เปลวคลื่นพลังงานซ้อนสมมาตรทรงพลัง',
+  },
+  {
+    key: 'triple_sine',
+    label: 'ริบบิ้น 3 เส้น',
+    description: 'เส้นคลื่นไซน์ 3 สายสลับเฟสพริ้วไหว',
+  },
+  {
+    key: 'seismic_line',
+    label: 'เส้นซิงก์จังหวะ',
+    description: 'เส้นคลื่นซิงก์จังหวะสมมาตรเรียวปลายสองข้าง',
   },
 ];
 
@@ -257,24 +287,3 @@ export interface DemoArtwork {
   aspectHint: string;
   src: string;
 }
-
-export const DEMO_ARTWORKS: DemoArtwork[] = [
-  {
-    id: 'midnight-synth',
-    title: 'Analog Synth Studio',
-    aspectHint: '16:9',
-    src: midnightSynth,
-  },
-  {
-    id: 'vinyl-eclipse',
-    title: 'Vinyl Eclipse Cover',
-    aspectHint: '1:1',
-    src: vinylEclipse,
-  },
-  {
-    id: 'tokyo-rain',
-    title: 'Tokyo Rain Reflections',
-    aspectHint: '9:16',
-    src: tokyoRain,
-  },
-];

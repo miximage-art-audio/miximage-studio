@@ -31,8 +31,8 @@ test('ASPECT_RATIOS defines all 7 required 1080p Full HD ratios', () => {
   assert.equal(ASPECT_RATIOS['4:5'].height, 1350);
 });
 
-test('WAVEFORM_STYLES defines 8 styles, COLOR_THEMES defines 4 themes, and BASS_INTENSITY_PRESETS supports soft values', () => {
-  assert.equal(WAVEFORM_STYLES.length, 8);
+test('WAVEFORM_STYLES defines 15 non-circular 3D/wave styles, COLOR_THEMES defines 4 themes, and BASS_INTENSITY_PRESETS supports soft values', () => {
+  assert.equal(WAVEFORM_STYLES.length, 15);
   assert.deepEqual(
     BASS_INTENSITY_PRESETS.map((p) => p.value),
     [0.0, 0.2, 0.5, 1.0, 1.5, 2.0]
@@ -40,14 +40,21 @@ test('WAVEFORM_STYLES defines 8 styles, COLOR_THEMES defines 4 themes, and BASS_
   assert.deepEqual(
     WAVEFORM_STYLES.map((s) => s.key),
     [
-      'neon_bars',
-      'smooth_wave',
-      'circular_core',
-      'mirror_horizon',
-      'pulse_rings',
-      'particle_burst',
-      'dual_ribbon',
-      'matrix_blocks',
+      'bars_3d',
+      'layered_fluid',
+      'dot_halftone',
+      'pixel_grid',
+      'mesh_ribbon',
+      'smooth_osc',
+      'mirror_needles',
+      'silk_aura',
+      'prism_peaks',
+      'brush_spectrum',
+      'harmonic_waves',
+      'dot_mountains',
+      'double_flame',
+      'triple_sine',
+      'seismic_line',
     ]
   );
   assert.deepEqual(Object.keys(COLOR_THEMES), [
@@ -59,13 +66,9 @@ test('WAVEFORM_STYLES defines 8 styles, COLOR_THEMES defines 4 themes, and BASS_
 });
 
 test('WaveformLayoutConfig defaults and clamping enforce valid ranges', () => {
-  const linearDefault = getDefaultWaveformLayout('neon_bars');
-  assert.equal(linearDefault.posX, 0.5);
-  assert.equal(linearDefault.posY, 0.82);
-
-  const radialDefault = getDefaultWaveformLayout('pulse_rings');
-  assert.equal(radialDefault.posX, 0.5);
-  assert.equal(radialDefault.posY, 0.5);
+  const def = getDefaultWaveformLayout('bars_3d');
+  assert.equal(def.posX, 0.5);
+  assert.equal(def.posY, 0.80);
 
   const clamped = clampWaveformLayout({
     posX: -0.5,
@@ -137,12 +140,12 @@ test('computeFitGeometry scales 16:9 image into 9:16 cover and blur_pad contain 
   assert.ok(geom.contain.y > 0);
 });
 
-test('Code templates inject studio defaults and soft bass intensity cleanly into cloud_render.yml', () => {
+test('Code templates inject studio defaults and 15 styles cleanly into cloud_render.yml', () => {
   const reqs = generateRequirementsTxt();
   const py = generateRenderEnginePy();
   const yml = generateCloudRenderYaml({
     ratio: '9:16',
-    style: 'pulse_rings',
+    style: 'bars_3d',
     theme: 'gold_fire',
     bass: 0.2,
     fit: 'blur_pad',
@@ -152,12 +155,13 @@ test('Code templates inject studio defaults and soft bass intensity cleanly into
 
   assert.match(reqs, /librosa>=0\.10\.1/);
   assert.match(py, /def apply_bass_transform/);
-  assert.match(py, /mirror_horizon/);
-  assert.match(py, /matrix_blocks/);
+  assert.match(py, /bars_3d/);
+  assert.match(py, /dot_mountains/);
+  assert.doesNotMatch(py, /circular_core/);
   assert.match(py, /--pos-x/);
   assert.match(py, /--opacity/);
   assert.match(yml, /default: '9:16'/);
-  assert.match(yml, /default: 'pulse_rings'/);
+  assert.match(yml, /default: 'bars_3d'/);
   assert.match(yml, /default: 'gold_fire'/);
   assert.match(yml, /default: '0\.2'/);
   assert.match(yml, /default: 'blur_pad'/);

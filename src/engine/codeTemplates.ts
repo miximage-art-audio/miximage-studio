@@ -55,14 +55,21 @@ COLOR_THEMES = {
 }
 
 ALL_WAVEFORM_STYLES = [
-    "neon_bars",
-    "smooth_wave",
-    "circular_core",
-    "mirror_horizon",
-    "pulse_rings",
-    "particle_burst",
-    "dual_ribbon",
-    "matrix_blocks",
+    "bars_3d",
+    "layered_fluid",
+    "dot_halftone",
+    "pixel_grid",
+    "mesh_ribbon",
+    "smooth_osc",
+    "mirror_needles",
+    "silk_aura",
+    "prism_peaks",
+    "brush_spectrum",
+    "harmonic_waves",
+    "dot_mountains",
+    "double_flame",
+    "triple_sine",
+    "seismic_line",
 ]
 
 
@@ -98,22 +105,22 @@ def analyze_audio(wav_path, fps, n_bars=64):
         bass_raw = bass_raw / np.max(bass_raw)
 
     bass_env = np.zeros_like(bass_raw)
-    attack, release = 0.65, 0.18
+    attack, release = 0.42, 0.12
     for i in range(1, len(bass_raw)):
         if bass_raw[i] > bass_env[i - 1]:
             bass_env[i] = attack * bass_raw[i] + (1 - attack) * bass_env[i - 1]
         else:
             bass_env[i] = release * bass_raw[i] + (1 - release) * bass_env[i - 1]
-    bass_env = np.power(bass_env, 1.4)
+    bass_env = gaussian_filter1d(np.power(bass_env, 1.35), sigma=0.75)
 
-    # 2. สกัดสเปกตรัมความถี่ 64 แท่ง (30Hz - 12,000Hz)
+    # 2. สกัดสเปกตรัมความถี่ 64 แท่ง (30Hz - 12,000Hz) พร้อมกรองความนุ่มนวล
     mel_spec = librosa.feature.melspectrogram(
         S=stft**2, sr=sr, n_mels=n_bars, fmin=30, fmax=12000
     )
     mel_db = librosa.power_to_db(mel_spec, ref=np.max)
     mel_norm = (mel_db + 80.0) / 80.0
     mel_norm = np.clip(mel_norm, 0.0, 1.0)
-    mel_norm = gaussian_filter1d(mel_norm, sigma=0.9, axis=1)
+    mel_norm = gaussian_filter1d(mel_norm, sigma=1.45, axis=1)
 
     return bass_env, mel_norm, len(bass_env)
 
@@ -175,10 +182,10 @@ def lerp_bgr(c1, c2, ratio):
 
 def draw_waveform(
     frame, spec_col, bass_val, style, theme_name,
-    pos_x=0.5, pos_y=0.82, wf_scale=1.0, opacity=1.0, frame_idx=0
+    pos_x=0.5, pos_y=0.80, wf_scale=1.0, opacity=1.0, frame_idx=0
 ):
     """
-    วาดกราฟิกคลื่นเสียง 8 สไตล์ พร้อมย้ายตำแหน่ง ปรับขนาด ปรับความโปร่งใส และเอฟเฟกต์ Neon Bloom
+    วาดกราฟิกคลื่นเสียง 15 สไตล์ (แท่ง 3D และคลื่นแนวนอน ไม่มีวงกลม) พร้อมปรับตำแหน่ง ขนาด โปร่งใส และ Neon Bloom
     """
     if opacity <= 0.001:
         return frame
@@ -186,112 +193,124 @@ def draw_waveform(
     h, w = frame.shape[:2]
     overlay = np.zeros_like(frame)
     c1, c2 = COLOR_THEMES.get(theme_name, COLOR_THEMES["cyberpunk"])
+    c_mid = lerp_bgr(c1, c2, 0.5)
     n_bars = len(spec_col)
     cx, cy = int(w * pos_x), int(h * pos_y)
+    span_w = int(w * 0.84 * wf_scale)
+    x_start = cx - span_w // 2
 
-    if style == "neon_bars":
-        bar_area_w = int(w * 0.82 * wf_scale)
-        start_x = cx - bar_area_w // 2
-        max_bar_h = int(h * 0.16 * wf_scale)
-        step = bar_area_w / n_bars
-        bar_w = max(2, int(step * 0.6))
-        for i, val in enumerate(spec_col):
-            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
-            bh = max(4, int((val ** 1.3) * max_bar_h * (1.0 + bass_val * 0.35)))
-            x = int(start_x + i * step)
-            cv2.rectangle(overlay, (x, cy - bh), (x + bar_w, cy + int(bh * 0.35)), color, -1, cv2.LINE_AA)
+    def sample_u(u):
+        pos = max(0.0, min(1.0, u)) * (n_bars - 1)
+        i0 = int(pos)
+        i1 = min(n_bars - 1, i0 + 1)
+        t = pos - i0
+        return spec_col[i0] * (1.0 - t) + spec_col[i1] * t
 
-    elif style == "smooth_wave":
-        span_w = int(w * 0.84 * wf_scale)
-        max_amp = int(h * 0.15 * wf_scale)
-        xs = np.linspace(cx - span_w // 2, cx + span_w // 2, n_bars)
-        amps = (spec_col ** 1.25) * max_amp * (1.0 + bass_val * 0.3)
-        pts_top = np.column_stack((xs, cy - amps)).astype(np.int32)
-        pts_bot = np.column_stack((xs[::-1], cy + amps[::-1] * 0.45)).astype(np.int32)
-        cv2.fillPoly(overlay, [np.vstack((pts_top, pts_bot))], c2, cv2.LINE_AA)
-        cv2.polylines(overlay, [pts_top], False, c1, max(2, int(4 * wf_scale)), cv2.LINE_AA)
+    def taper(u):
+        return np.sin(max(0.0, min(1.0, u)) * np.pi) * 0.65 + 0.35
 
-    elif style == "circular_core":
-        base_r = int(min(w, h) * 0.18 * wf_scale * (1.0 + bass_val * 0.22))
-        max_len = int(min(w, h) * 0.16 * wf_scale)
-        angles = np.linspace(0, 2 * np.pi, n_bars, endpoint=False)
-        for i, angle in enumerate(angles):
-            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
-            length = max(4, int((spec_col[i] ** 1.3) * max_len))
-            x1, y1 = int(cx + np.cos(angle) * base_r), int(cy + np.sin(angle) * base_r)
-            x2, y2 = int(cx + np.cos(angle) * (base_r + length)), int(cy + np.sin(angle) * (base_r + length))
-            cv2.line(overlay, (x1, y1), (x2, y2), color, max(2, int(4 * wf_scale)), cv2.LINE_AA)
-        cv2.circle(overlay, (cx, cy), base_r, c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+    if style == "bars_3d":
+        count = 36
+        step = span_w / count
+        bar_w = max(4, int(step * 0.54))
+        dx3 = max(3, int(bar_w * 0.36))
+        dy3 = max(2, int(bar_w * 0.26))
+        max_h = int(h * 0.17 * wf_scale)
+        base_y = cy + int(max_h * 0.15)
+        for i in range(count):
+            u = i / max(1, count - 1)
+            val = sample_u(u)
+            col = lerp_bgr(c1, c2, u)
+            side_col = tuple(int(v * 0.5) for v in col)
+            top_col = tuple(min(255, int(v * 0.45 + 140)) for v in col)
+            bh = max(6, int((val ** 1.25) * max_h * (1.0 + bass_val * 0.28)))
+            x = int(x_start + i * step + (step - bar_w) * 0.3)
+            yt = base_y - bh
+            cv2.rectangle(overlay, (x, yt), (x + bar_w, base_y), col, -1, cv2.LINE_AA)
+            side_pts = np.array([[x + bar_w, yt], [x + bar_w + dx3, yt - dy3], [x + bar_w + dx3, base_y - dy3], [x + bar_w, base_y]], dtype=np.int32)
+            top_pts = np.array([[x, yt], [x + dx3, yt - dy3], [x + bar_w + dx3, yt - dy3], [x + bar_w, yt]], dtype=np.int32)
+            cv2.fillPoly(overlay, [side_pts], side_col, cv2.LINE_AA)
+            cv2.fillPoly(overlay, [top_pts], top_col, cv2.LINE_AA)
 
-    elif style == "mirror_horizon":
-        bar_area_w = int(w * 0.84 * wf_scale)
-        start_x = cx - bar_area_w // 2
-        max_half_h = int(h * 0.13 * wf_scale)
-        step = bar_area_w / n_bars
-        bar_w = max(2, int(step * 0.58))
-        cv2.line(overlay, (start_x, cy), (start_x + bar_area_w, cy), c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
-        for i, val in enumerate(spec_col):
-            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
-            hh = max(3, int((val ** 1.28) * max_half_h * (1.0 + bass_val * 0.35)))
-            x = int(start_x + i * step)
-            cv2.rectangle(overlay, (x, cy - hh), (x + bar_w, cy + hh), color, -1, cv2.LINE_AA)
+    elif style == "pixel_grid":
+        cols = 48
+        step_x = span_w / cols
+        cell_w = max(3, int(step_x * 0.62))
+        cell_h = max(3, int(cell_w * 0.72))
+        gap_y = max(2, int(cell_h * 0.32))
+        for i in range(cols):
+            u = i / max(1, cols - 1)
+            col = lerp_bgr(c1, c2, u)
+            cnt = max(1, min(8, int(round((sample_u(u) ** 1.18) * 8 * taper(u) * (1.0 + bass_val * 0.25)))))
+            x = int(x_start + i * step_x)
+            for b in range(cnt):
+                off = b * (cell_h + gap_y)
+                c = (255, 255, 255) if b == cnt - 1 else col
+                cv2.rectangle(overlay, (x, cy - off - cell_h // 2), (x + cell_w, cy - off + cell_h // 2), c, -1, cv2.LINE_AA)
+                if b > 0:
+                    cv2.rectangle(overlay, (x, cy + off - cell_h // 2), (x + cell_w, cy + off + cell_h // 2), c, -1, cv2.LINE_AA)
 
-    elif style == "pulse_rings":
-        min_dim = min(w, h) * wf_scale
-        slices = [(0, 18, 0.12, 0.045, c1), (18, 42, 0.21, 0.055, lerp_bgr(c1, c2, 0.5)), (42, 64, 0.30, 0.05, c2)]
-        for r_idx, (s, e, br, amp_s, col) in enumerate(slices):
-            pts = []
-            pulse_r = min_dim * br * (1.0 + bass_val * (0.22 - r_idx * 0.04))
-            for p in range(72):
-                ang = (p / 72.0) * 2 * np.pi
-                b_idx = int(s + (p / 72.0) * (e - s)) % n_bars
-                rad = pulse_r + (spec_col[b_idx] ** 1.2) * (min_dim * amp_s)
-                pts.append([int(cx + np.cos(ang) * rad), int(cy + np.sin(ang) * rad)])
-            cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], True, col, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+    elif style in ("dot_halftone", "dot_mountains"):
+        cols = 52
+        step_x = span_w / cols
+        max_hh = int(h * 0.14 * wf_scale)
+        for i in range(cols):
+            u = i / max(1, cols - 1)
+            col = lerp_bgr(c1, c2, u)
+            x = int(x_start + (i + 0.5) * step_x)
+            hh = max(6, int((sample_u(u) ** 1.2) * max_hh * taper(u) * (1.0 + bass_val * 0.28)))
+            if style == "dot_halftone":
+                step_y = max(5, int(6.5 * wf_scale))
+                for d in range(0, max(1, hh // step_y) + 1):
+                    r = max(1, int(3 * wf_scale * (1.0 - 0.5 * d / max(1, hh // step_y))))
+                    cv2.circle(overlay, (x, cy - d * step_y), r, col, -1, cv2.LINE_AA)
+                    if d > 0:
+                        cv2.circle(overlay, (x, cy + d * step_y), r, col, -1, cv2.LINE_AA)
+            else:
+                peak_h = max(10, int((max(0.14, sample_u(u)) ** 0.92) * max_hh * 1.15 * taper(u) * (1.0 + bass_val * 0.30)))
+                for row in range(10):
+                    frac = row / 9.0
+                    py = int(cy + max_hh * 0.25 - (frac ** 0.85) * peak_h - frac * 6 * wf_scale)
+                    px = int(x + (frac - 0.5) * 16 * wf_scale)
+                    cv2.circle(overlay, (px, py), max(1, int((1.8 + frac * 1.4) * wf_scale)), col, -1, cv2.LINE_AA)
 
-    elif style == "particle_burst":
-        min_dim = min(w, h) * wf_scale
-        inner_r = int(min_dim * 0.11 * (1.0 + bass_val * 0.24))
-        max_dist = min_dim * 0.24
-        cv2.circle(overlay, (cx, cy), inner_r, c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
-        for i, val in enumerate(spec_col):
-            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
-            ang = (i * 2 * np.pi) / n_bars + frame_idx * 0.012
-            dist = inner_r + (val ** 1.25) * max_dist * (1.0 + bass_val * 0.25)
-            x1, y1 = int(cx + np.cos(ang) * inner_r), int(cy + np.sin(ang) * inner_r)
-            x2, y2 = int(cx + np.cos(ang) * dist), int(cy + np.sin(ang) * dist)
-            cv2.line(overlay, (x1, y1), (x2, y2), color, max(1, int(2 * wf_scale)), cv2.LINE_AA)
-            cv2.circle(overlay, (x2, y2), max(3, int((3.5 + val * 6.5) * wf_scale)), color, -1, cv2.LINE_AA)
+    elif style in ("mirror_needles", "silk_aura", "brush_spectrum"):
+        cols = 96
+        step_x = span_w / cols
+        max_hh = int(h * 0.15 * wf_scale)
+        lw = max(1, int((step_x * 0.75) if style != "mirror_needles" else 2 * wf_scale))
+        for i in range(cols):
+            u = i / max(1, cols - 1)
+            col = lerp_bgr(c1, c2, u)
+            x = int(x_start + i * step_x)
+            hh = max(3, int((sample_u(u) ** 1.2) * max_hh * taper(u) * (1.0 + bass_val * 0.28)))
+            cv2.line(overlay, (x, cy - hh), (x, cy + hh), col, lw, cv2.LINE_AA)
 
-    elif style == "dual_ribbon":
-        span_w = int(w * 0.86 * wf_scale)
-        max_amp = int(h * 0.14 * wf_scale)
-        xs = np.linspace(cx - span_w // 2, cx + span_w // 2, n_bars)
-        for sign, col in [(-1.0, c1), (1.0, c2)]:
-            pts = []
-            for i, val in enumerate(spec_col):
-                mod = np.sin(i * 0.35 + frame_idx * 0.15 * sign)
-                y = cy + sign * (val ** 1.15) * max_amp * (0.65 + 0.35 * mod) * (1.0 + bass_val * 0.32)
-                pts.append([int(xs[i]), int(y)])
-            cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], False, col, max(2, int(4 * wf_scale)), cv2.LINE_AA)
-
-    elif style == "matrix_blocks":
-        bar_area_w = int(w * 0.84 * wf_scale)
-        start_x = cx - bar_area_w // 2
-        max_blocks = 14
-        total_h = int(h * 0.22 * wf_scale)
-        step = bar_area_w / n_bars
-        block_w = max(2, int(step * 0.64))
-        cell_step = total_h / max_blocks
-        block_h = max(2, int(cell_step * 0.68))
-        for i, val in enumerate(spec_col):
-            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
-            count = max(1, min(max_blocks, int(round((val ** 1.2) * max_blocks * (1.0 + bass_val * 0.25)))))
-            x = int(start_x + i * step)
-            for b in range(count):
-                y = int(cy - b * cell_step - block_h)
-                col = (255, 255, 255) if b == count - 1 else color
-                cv2.rectangle(overlay, (x, y), (x + block_w, y + block_h), col, -1, cv2.LINE_AA)
+    else:
+        pts_cnt = 72
+        max_amp = int(h * 0.145 * wf_scale)
+        freq_map = {"smooth_osc": 10.0, "triple_sine": 7.0, "seismic_line": 22.0, "mesh_ribbon": 3.5}
+        freq = freq_map.get(style, 5.0)
+        if style in ("layered_fluid", "prism_peaks", "harmonic_waves", "double_flame"):
+            top_pts, bot_pts = [], []
+            for i in range(pts_cnt):
+                u = i / (pts_cnt - 1)
+                x = int(x_start + u * span_w)
+                amp = int((sample_u(u) ** 1.15) * max_amp * taper(u) * (0.72 + 0.28 * np.sin(u * np.pi * freq + frame_idx * 0.11)))
+                top_pts.append([x, cy - amp])
+                bot_pts.append([x, cy + int(amp * 0.85)])
+            poly = np.vstack((np.array(top_pts, dtype=np.int32), np.array(bot_pts[::-1], dtype=np.int32)))
+            cv2.fillPoly(overlay, [poly], c_mid, cv2.LINE_AA)
+            cv2.polylines(overlay, [np.array(top_pts, dtype=np.int32)], False, c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+        else:
+            for layer_i, col in enumerate([c1, c_mid, c2] if style in ("triple_sine", "mesh_ribbon") else [c1]):
+                pts = []
+                for i in range(pts_cnt):
+                    u = i / (pts_cnt - 1)
+                    x = int(x_start + u * span_w)
+                    y = int(cy + np.sin(u * np.pi * freq + frame_idx * 0.14 + layer_i * 2.1) * (sample_u(u) ** 1.1) * max_amp * taper(u))
+                    pts.append([x, y])
+                cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], False, col, max(2, int(3.5 * wf_scale)), cv2.LINE_AA)
 
     glow = cv2.GaussianBlur(overlay, (0, 0), sigmaX=15, sigmaY=15)
     combined = cv2.addWeighted(frame, 1.0, glow, 0.85 * opacity, 0)
@@ -305,13 +324,13 @@ def main():
     parser.add_argument("--audio", required=True, help="ที่อยู่ไฟล์เสียง")
     parser.add_argument("--output", default="output_bass_sync.mp4", help="ชื่อไฟล์วิดีโอผลลัพธ์")
     parser.add_argument("--ratio", default="16:9", choices=list(ASPECT_RATIOS.keys()), help="อัตราส่วนภาพ")
-    parser.add_argument("--style", default="neon_bars", choices=ALL_WAVEFORM_STYLES, help="รูปแบบคลื่นเสียง")
+    parser.add_argument("--style", default="bars_3d", choices=ALL_WAVEFORM_STYLES, help="รูปแบบคลื่นเสียง")
     parser.add_argument("--theme", default="cyberpunk", choices=list(COLOR_THEMES.keys()), help="โทนสีคลื่นเสียง")
     parser.add_argument("--bass", type=float, default=1.0, help="ความแรงการกระตุกตามเบส")
     parser.add_argument("--fit", default="cover", choices=["cover", "blur_pad"], help="โหมดการจัดวางภาพ")
     parser.add_argument("--fps", type=int, default=30, help="จำนวนเฟรมต่อวินาที")
     parser.add_argument("--pos-x", type=float, default=0.50, help="ตำแหน่งแนวนอนคลื่นเสียง (0.10 - 0.90)")
-    parser.add_argument("--pos-y", type=float, default=0.82, help="ตำแหน่งแนวตั้งคลื่นเสียง (0.10 - 0.90)")
+    parser.add_argument("--pos-y", type=float, default=0.80, help="ตำแหน่งแนวตั้งคลื่นเสียง (0.10 - 0.90)")
     parser.add_argument("--scale", type=float, default=1.0, help="ขนาดคลื่นเสียง (0.40 - 2.00)")
     parser.add_argument("--opacity", type=float, default=1.0, help="ความโปร่งใสคลื่นเสียง (0.00 - 1.00)")
     args = parser.parse_args()
@@ -391,19 +410,26 @@ on:
           - '16:9'
           - '9:16'
       waveform_style:
-        description: '2. เลือกรูปแบบคลื่นเสียง (8 สไตล์)'
+        description: '2. เลือกรูปแบบคลื่นเสียง (15 สไตล์)'
         required: true
         default: '${defaults.style}'
         type: choice
         options:
-          - 'neon_bars'
-          - 'smooth_wave'
-          - 'circular_core'
-          - 'mirror_horizon'
-          - 'pulse_rings'
-          - 'particle_burst'
-          - 'dual_ribbon'
-          - 'matrix_blocks'
+          - 'bars_3d'
+          - 'layered_fluid'
+          - 'dot_halftone'
+          - 'pixel_grid'
+          - 'mesh_ribbon'
+          - 'smooth_osc'
+          - 'mirror_needles'
+          - 'silk_aura'
+          - 'prism_peaks'
+          - 'brush_spectrum'
+          - 'harmonic_waves'
+          - 'dot_mountains'
+          - 'double_flame'
+          - 'triple_sine'
+          - 'seismic_line'
       color_theme:
         description: '3. เลือกโทนสีคลื่นเสียง'
         required: true

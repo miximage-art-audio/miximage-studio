@@ -14,13 +14,13 @@ import {
   ASPECT_RATIOS,
   AspectRatioKey,
   ColorThemeKey,
-  DEMO_ARTWORKS,
   FitMode,
   FpsOption,
   WaveformLayoutConfig,
   WaveformStyle,
   getDefaultWaveformLayout,
 } from './engine/presets';
+import { DEMO_ARTWORKS } from './engine/demoArtworks';
 import {
   RenderSurface,
   createRenderSurface,
@@ -67,12 +67,12 @@ export default function App() {
 
   const [ratio, setRatio] = useState<AspectRatioKey>('16:9');
   const [fitMode, setFitMode] = useState<FitMode>('cover');
-  const [style, setStyle] = useState<WaveformStyle>('neon_bars');
+  const [style, setStyle] = useState<WaveformStyle>('bars_3d');
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
   const [bassIntensity, setBassIntensity] = useState<number>(1.0);
   const [fps, setFps] = useState<FpsOption>(30);
   const [waveformLayout, setWaveformLayout] = useState<WaveformLayoutConfig>(() =>
-    getDefaultWaveformLayout('neon_bars')
+    getDefaultWaveformLayout('bars_3d')
   );
   const hasCustomPosRef = useRef<boolean>(false);
 
@@ -219,17 +219,27 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return 0;
 
-    const frameIdx = Math.min(
+    const exactFrame = Math.min(
       dsp.totalFrames - 1,
-      Math.max(0, Math.floor(timeSec * curFps))
+      Math.max(0, timeSec * curFps)
     );
-    const bassVal = dsp.bassEnv[frameIdx] ?? 0;
+    const f0 = Math.floor(exactFrame);
+    const f1 = Math.min(dsp.totalFrames - 1, f0 + 1);
+    const frac = exactFrame - f0;
+    const smoothFrac = frac * frac * (3 - 2 * frac);
+
+    const bassVal =
+      (dsp.bassEnv[f0] ?? 0) * (1 - smoothFrac) +
+      (dsp.bassEnv[f1] ?? 0) * smoothFrac;
+
     const specCol = new Float32Array(64);
     for (let b = 0; b < 64; b++) {
-      specCol[b] = dsp.melSpec[b][frameIdx] ?? 0;
+      const v0 = dsp.melSpec[b][f0] ?? 0;
+      const v1 = dsp.melSpec[b][f1] ?? 0;
+      specCol[b] = v0 * (1 - smoothFrac) + v1 * smoothFrac;
     }
 
-    renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, frameIdx, wfLayout);
+    renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, exactFrame, wfLayout);
     return bassVal;
   }, []);
 

@@ -246,17 +246,17 @@ export function analyzeAudioSamples(
     }
   }
 
-  // Normalize bass_raw & apply Attack/Release Envelope (65% / 18%)
+  // Normalize bass_raw & apply smoother Attack/Release Envelope (42% / 12%)
   if (maxBassRaw > 0) {
     for (let f = 0; f < totalFrames; f++) {
       bassRaw[f] /= maxBassRaw;
     }
   }
 
-  const bassEnv = new Float32Array(totalFrames);
-  const attack = 0.65;
-  const release = 0.18;
-  bassEnv[0] = Math.pow(bassRaw[0] * attack, 1.4);
+  const bassEnvRaw = new Float32Array(totalFrames);
+  const attack = 0.42;
+  const release = 0.12;
+  bassEnvRaw[0] = Math.pow(bassRaw[0] * attack, 1.35);
 
   let envPrev = bassRaw[0] * attack;
   for (let f = 1; f < totalFrames; f++) {
@@ -265,16 +265,17 @@ export function analyzeAudioSamples(
     } else {
       envPrev = release * bassRaw[f] + (1.0 - release) * envPrev;
     }
-    bassEnv[f] = Math.pow(Math.max(0, envPrev), 1.4);
+    bassEnvRaw[f] = Math.pow(Math.max(0, envPrev), 1.35);
   }
+  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.75);
 
   let peakBassFrames = 0;
   for (let f = 0; f < totalFrames; f++) {
     if (bassEnv[f] > 0.45) peakBassFrames++;
   }
 
-  // Convert Mel power to dB relative to maxMelPower, normalize [-80, 0] -> [0, 1], smooth sigma=0.9
-  const melSpec: Float32Array[] = [];
+  // Convert Mel power to dB relative to maxMelPower, normalize [-80, 0] -> [0, 1], smooth sigma=1.45
+  const tempMel: Float32Array[] = [];
   for (let m = 0; m < nBars; m++) {
     const normRow = new Float32Array(totalFrames);
     for (let f = 0; f < totalFrames; f++) {
@@ -283,7 +284,21 @@ export function analyzeAudioSamples(
       const norm = Math.min(1.0, Math.max(0.0, (db + 80.0) / 80.0));
       normRow[f] = norm;
     }
-    melSpec.push(gaussianFilter1dRow(normRow, 0.9));
+    tempMel.push(gaussianFilter1dRow(normRow, 1.45));
+  }
+
+  // Gentle 3-tap spatial smoothing across adjacent Mel bands for fluid wave shapes
+  const melSpec: Float32Array[] = Array.from({ length: nBars }, () => new Float32Array(totalFrames));
+  for (let m = 0; m < nBars; m++) {
+    const prevRow = tempMel[Math.max(0, m - 1)];
+    const currRow = tempMel[m];
+    const nextRow = tempMel[Math.min(nBars - 1, m + 1)];
+    for (let f = 0; f < totalFrames; f++) {
+      melSpec[m][f] = Math.min(
+        1.0,
+        Math.max(0.0, prevRow[f] * 0.18 + currRow[f] * 0.64 + nextRow[f] * 0.18)
+      );
+    }
   }
 
   return {

@@ -7,6 +7,7 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
+  WaveformLayoutConfig,
   WaveformStyle,
 } from '../engine/presets';
 import { createRenderSurface, renderStudioFrame } from '../engine/renderer';
@@ -30,6 +31,7 @@ interface RenderExportModalProps {
   theme: ColorThemeKey;
   bassIntensity: number;
   fps: FpsOption;
+  waveformLayout: WaveformLayoutConfig;
 }
 
 type RenderStatus = 'idle' | 'rendering' | 'done' | 'error';
@@ -60,6 +62,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   theme,
   bassIntensity,
   fps,
+  waveformLayout,
 }) => {
   const [resolutionScale, setResolutionScale] = useState<'1080p' | '720p'>('1080p');
   const [status, setStatus] = useState<RenderStatus>('idle');
@@ -148,20 +151,30 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       if (!renderCtx) throw new Error('สร้าง Canvas สำหรับเรนเดอร์ไม่สำเร็จ');
 
       const specCol = new Float32Array(64);
-      const drawFrame = (frameIndex: number) => {
-        const safeFrameIndex = Math.max(0, Math.min(dsp.totalFrames - 1, frameIndex));
+      const drawFrame = (exactFrame: number) => {
+        const clampedFrame = Math.max(0, Math.min(dsp.totalFrames - 1, exactFrame));
+        const f0 = Math.floor(clampedFrame);
+        const f1 = Math.min(dsp.totalFrames - 1, f0 + 1);
+        const frac = clampedFrame - f0;
+        const smoothFrac = frac * frac * (3 - 2 * frac);
+        const bassVal =
+          (dsp.bassEnv[f0] ?? 0) * (1 - smoothFrac) +
+          (dsp.bassEnv[f1] ?? 0) * smoothFrac;
         for (let band = 0; band < 64; band++) {
-          specCol[band] = dsp.melSpec[band][safeFrameIndex] ?? 0;
+          const v0 = dsp.melSpec[band][f0] ?? 0;
+          const v1 = dsp.melSpec[band][f1] ?? 0;
+          specCol[band] = v0 * (1 - smoothFrac) + v1 * smoothFrac;
         }
         renderStudioFrame(
           renderCtx,
           surface,
           specCol,
-          dsp.bassEnv[safeFrameIndex] ?? 0,
+          bassVal,
           style,
           theme,
           bassIntensity,
-          safeFrameIndex
+          clampedFrame,
+          waveformLayout
         );
       };
       drawFrame(0);
@@ -244,14 +257,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           const tick = (now: number) => {
             if (recorder.state === 'inactive') return;
             const elapsed = Math.max(0, audioContext!.currentTime - startedAt);
-            const frameIndex = Math.min(
-              dsp.totalFrames - 1,
-              Math.floor(elapsed * fps)
-            );
-            if (frameIndex !== lastRenderedFrame) {
-              drawFrame(frameIndex);
-              lastRenderedFrame = frameIndex;
-            }
+            const exactFrame = Math.min(dsp.totalFrames - 1, elapsed * fps);
+            drawFrame(exactFrame);
+            lastRenderedFrame = Math.floor(exactFrame);
 
             if (now - lastProgressUpdate >= 120) {
               lastProgressUpdate = now;

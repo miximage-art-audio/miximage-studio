@@ -107,8 +107,25 @@ export function createRenderSurface(
   };
 }
 
+function sampleSpec(specCol: Float32Array | number[], u: number): number {
+  const n = specCol.length;
+  if (n === 0) return 0;
+  const clamped = Math.max(0, Math.min(1, u));
+  const pos = clamped * (n - 1);
+  const i0 = Math.floor(pos);
+  const i1 = Math.min(n - 1, i0 + 1);
+  const t = pos - i0;
+  const smoothT = t * t * (3 - 2 * t);
+  return (specCol[i0] ?? 0) * (1 - smoothT) + (specCol[i1] ?? 0) * smoothT;
+}
+
+function taperEnvelope(u: number): number {
+  // Smooth bell taper at far left & right edges so waves look clean like studio graphics
+  return Math.sin(Math.max(0, Math.min(1, u)) * Math.PI) * 0.65 + 0.35;
+}
+
 /**
- * Renders a single frame onto `targetCtx` with Bass-Sync Physics + 64-band Neon Bloom Waveform (8 styles)
+ * Renders a single frame onto `targetCtx` with smooth Bass-Sync Physics + 64-band Neon Bloom Waveform (15 styles)
  * with customizable position, scale, and opacity.
  */
 export function renderStudioFrame(
@@ -119,29 +136,27 @@ export function renderStudioFrame(
   style: WaveformStyle,
   themeKey: ColorThemeKey,
   intensityMult: number,
-  frameSeed = 0,
+  framePhase = 0,
   layout?: WaveformLayoutConfig
 ): void {
   const { width: w, height: h, baseCanvas, overlayCanvas, glowCanvas } = surface;
   const theme = COLOR_THEMES[themeKey] ?? COLOR_THEMES.cyberpunk;
   const c1 = theme.c1Rgb;
   const c2 = theme.c2Rgb;
+  const cMid = lerpColor(c1, c2, 0.5);
   const wfLayout = layout ?? getDefaultWaveformLayout(style);
 
-  // 1. Bass-Sync Physics Engine (Zoom Punch + Directional Micro-Shake + Luminance Flash)
-  const zoom = 1.0 + bassVal * 0.1 * intensityMult;
+  // 1. Smooth Bass-Sync Physics Engine (Subtle Zoom Punch + Smooth Micro-Shake + Luminance Flash)
+  const zoom = 1.0 + bassVal * 0.085 * intensityMult;
   const scaleFactor = Math.min(w, h) / 1080;
-  const shakePx = bassVal > 0.45 ? Math.floor(bassVal * 14 * intensityMult * scaleFactor) : 0;
+  const shakePx = bassVal > 0.45 ? bassVal * 10 * intensityMult * scaleFactor : 0;
 
   let dx = 0;
   let dy = 0;
-  if (shakePx > 0) {
-    const s1 = Math.sin((frameSeed + 1) * 12.9898) * 43758.5453;
-    const s2 = Math.sin((frameSeed + 1) * 78.233) * 43758.5453;
-    const r1 = (s1 - Math.floor(s1)) * 2 - 1;
-    const r2 = (s2 - Math.floor(s2)) * 2 - 1;
-    dx = Math.round(r1 * shakePx);
-    dy = Math.round(r2 * shakePx);
+  if (shakePx > 0.1) {
+    // Smooth organic dual-frequency sway instead of harsh frame-to-frame random jumps
+    dx = Math.sin(framePhase * 1.45) * shakePx * 0.75 + Math.cos(framePhase * 2.3) * shakePx * 0.25;
+    dy = Math.cos(framePhase * 1.65) * shakePx * 0.75 + Math.sin(framePhase * 2.1) * shakePx * 0.25;
   }
 
   targetCtx.save();
@@ -155,7 +170,7 @@ export function renderStudioFrame(
   targetCtx.drawImage(baseCanvas, 0, 0, w, h);
 
   if (bassVal > 0.3 && intensityMult > 0) {
-    const k = Math.min(0.6, (bassVal - 0.3) * 0.25 * intensityMult);
+    const k = Math.min(0.5, (bassVal - 0.3) * 0.22 * intensityMult);
     targetCtx.globalCompositeOperation = 'lighter';
     targetCtx.globalAlpha = k;
     targetCtx.drawImage(baseCanvas, 0, 0, w, h);
@@ -166,303 +181,490 @@ export function renderStudioFrame(
     return;
   }
 
-  // 2. Draw 64-band Waveform onto transparent overlayCanvas centered on (anchorX, anchorY) with scale
+  // 2. Draw 15 Non-Circular 3D/Wave Styles onto transparent overlayCanvas
   const oCtx = overlayCanvas.getContext('2d')!;
   oCtx.clearRect(0, 0, w, h);
-  const nBars = specCol.length;
   const anchorX = w * wfLayout.posX;
   const anchorY = h * wfLayout.posY;
+  const spanW = w * 0.84;
+  const xStart = -spanW / 2;
+  const xEnd = spanW / 2;
+
+  const makeSpanGrad = (alpha = 1) => {
+    const g = oCtx.createLinearGradient(xStart, 0, xEnd, 0);
+    g.addColorStop(0, rgbStr(c1, alpha));
+    g.addColorStop(0.5, rgbStr(cMid, alpha));
+    g.addColorStop(1, rgbStr(c2, alpha));
+    return g;
+  };
 
   oCtx.save();
   oCtx.translate(anchorX, anchorY);
   oCtx.scale(wfLayout.scale, wfLayout.scale);
 
-  if (style === 'neon_bars') {
-    const barAreaW = w * 0.82;
-    const startX = -barAreaW / 2;
-    const maxBarH = h * 0.16;
-    const step = barAreaW / nBars;
-    const barW = Math.max(2, step * 0.6);
+  if (style === 'bars_3d') {
+    // 1. 3D Isometric Extruded Equalizer Bars (front gradient face + bright top cap + 3D side extrusion + soft reflection)
+    const count = 36;
+    const step = spanW / count;
+    const barW = Math.max(4, step * 0.54);
+    const depthX = Math.max(2.5, barW * 0.36);
+    const depthY = Math.max(2.0, barW * 0.26);
+    const maxBarH = h * 0.17;
+    const baseLineY = maxBarH * 0.15;
 
-    for (let i = 0; i < nBars; i++) {
-      const val = specCol[i] ?? 0;
-      const ratio = i / Math.max(1, nBars - 1);
-      const col = lerpColor(c1, c2, ratio);
+    for (let i = 0; i < count; i++) {
+      const u = i / (count - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const sideCol = lerpColor(col, [8, 12, 24], 0.48);
+      const topCol = lerpColor(col, [255, 255, 255], 0.58);
+
       const bh = Math.max(
-        4 * scaleFactor,
-        Math.pow(val, 1.3) * maxBarH * (1.0 + bassVal * 0.35)
+        6 * scaleFactor,
+        Math.pow(val, 1.25) * maxBarH * (1.0 + bassVal * 0.28)
       );
-      const x = startX + i * step;
+      const x = xStart + i * step + (step - barW) * 0.3;
+      const yTop = baseLineY - bh;
 
-      oCtx.fillStyle = rgbStr(col);
-      oCtx.fillRect(x, -bh, barW, bh + bh * 0.35);
+      // Soft bottom reflection
+      const reflH = bh * 0.32;
+      const reflGrad = oCtx.createLinearGradient(0, baseLineY, 0, baseLineY + reflH);
+      reflGrad.addColorStop(0, rgbStr(col, 0.34));
+      reflGrad.addColorStop(1, rgbStr(col, 0));
+      oCtx.fillStyle = reflGrad;
+      oCtx.fillRect(x, baseLineY + 2 * scaleFactor, barW, reflH);
 
-      oCtx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      oCtx.fillRect(
-        x,
-        -bh - Math.max(2, 2.5 * scaleFactor),
-        barW,
-        Math.max(1.5, 2 * scaleFactor)
-      );
-    }
-  } else if (style === 'smooth_wave') {
-    const maxAmp = h * 0.15;
-    const spanW = w * 0.84;
-    const xStart = -spanW / 2;
-    const xEnd = spanW / 2;
-    const dxStep = spanW / Math.max(1, nBars - 1);
-
-    const topPts: Array<[number, number]> = [];
-    const botPts: Array<[number, number]> = [];
-    for (let i = 0; i < nBars; i++) {
-      const val = specCol[i] ?? 0;
-      const amp = Math.pow(val, 1.25) * maxAmp * (1.0 + bassVal * 0.3);
-      const x = xStart + i * dxStep;
-      topPts.push([x, -amp]);
-      botPts.push([x, amp * 0.45]);
-    }
-
-    const grad = oCtx.createLinearGradient(xStart, 0, xEnd, 0);
-    grad.addColorStop(0, rgbStr(c1, 0.65));
-    grad.addColorStop(1, rgbStr(c2, 0.75));
-
-    oCtx.beginPath();
-    oCtx.moveTo(topPts[0][0], topPts[0][1]);
-    for (let i = 1; i < topPts.length - 1; i++) {
-      const xc = (topPts[i][0] + topPts[i + 1][0]) / 2;
-      const yc = (topPts[i][1] + topPts[i + 1][1]) / 2;
-      oCtx.quadraticCurveTo(topPts[i][0], topPts[i][1], xc, yc);
-    }
-    oCtx.lineTo(topPts[topPts.length - 1][0], topPts[topPts.length - 1][1]);
-    for (let i = botPts.length - 1; i >= 0; i--) {
-      oCtx.lineTo(botPts[i][0], botPts[i][1]);
-    }
-    oCtx.closePath();
-    oCtx.fillStyle = grad;
-    oCtx.fill();
-
-    const strokeGrad = oCtx.createLinearGradient(xStart, 0, xEnd, 0);
-    strokeGrad.addColorStop(0, rgbStr(c1, 1));
-    strokeGrad.addColorStop(1, rgbStr(c2, 1));
-    oCtx.beginPath();
-    oCtx.moveTo(topPts[0][0], topPts[0][1]);
-    for (let i = 1; i < topPts.length - 1; i++) {
-      const xc = (topPts[i][0] + topPts[i + 1][0]) / 2;
-      const yc = (topPts[i][1] + topPts[i + 1][1]) / 2;
-      oCtx.quadraticCurveTo(topPts[i][0], topPts[i][1], xc, yc);
-    }
-    oCtx.lineTo(topPts[topPts.length - 1][0], topPts[topPts.length - 1][1]);
-    oCtx.strokeStyle = strokeGrad;
-    oCtx.lineWidth = Math.max(2.5, 4 * scaleFactor);
-    oCtx.lineCap = 'round';
-    oCtx.stroke();
-  } else if (style === 'circular_core') {
-    const baseR = Math.min(w, h) * 0.18 * (1.0 + bassVal * 0.22);
-    const maxLen = Math.min(w, h) * 0.16;
-
-    oCtx.lineWidth = Math.max(2.5, 4 * scaleFactor);
-    oCtx.lineCap = 'round';
-
-    for (let i = 0; i < nBars; i++) {
-      const angle = (i * 2 * Math.PI) / nBars;
-      const ratio = i / Math.max(1, nBars - 1);
-      const col = lerpColor(c1, c2, ratio);
-      const val = specCol[i] ?? 0;
-      const length = Math.max(4 * scaleFactor, Math.pow(val, 1.3) * maxLen);
-
-      const x1 = Math.cos(angle) * baseR;
-      const y1 = Math.sin(angle) * baseR;
-      const x2 = Math.cos(angle) * (baseR + length);
-      const y2 = Math.sin(angle) * (baseR + length);
-
-      oCtx.strokeStyle = rgbStr(col);
+      // Right 3D extruded face
+      oCtx.fillStyle = rgbStr(sideCol, 0.92);
       oCtx.beginPath();
-      oCtx.moveTo(x1, y1);
-      oCtx.lineTo(x2, y2);
-      oCtx.stroke();
+      oCtx.moveTo(x + barW, yTop);
+      oCtx.lineTo(x + barW + depthX, yTop - depthY);
+      oCtx.lineTo(x + barW + depthX, baseLineY - depthY);
+      oCtx.lineTo(x + barW, baseLineY);
+      oCtx.closePath();
+      oCtx.fill();
+
+      // Top 3D bevel face
+      oCtx.fillStyle = rgbStr(topCol, 0.96);
+      oCtx.beginPath();
+      oCtx.moveTo(x, yTop);
+      oCtx.lineTo(x + depthX, yTop - depthY);
+      oCtx.lineTo(x + barW + depthX, yTop - depthY);
+      oCtx.lineTo(x + barW, yTop);
+      oCtx.closePath();
+      oCtx.fill();
+
+      // Front illuminated bar face
+      const faceGrad = oCtx.createLinearGradient(0, yTop, 0, baseLineY);
+      faceGrad.addColorStop(0, rgbStr(lerpColor(col, [255, 255, 255], 0.15)));
+      faceGrad.addColorStop(1, rgbStr(lerpColor(col, [12, 18, 36], 0.25)));
+      oCtx.fillStyle = faceGrad;
+      oCtx.fillRect(x, yTop, barW, bh);
     }
-
-    oCtx.beginPath();
-    oCtx.arc(0, 0, baseR, 0, Math.PI * 2);
-    oCtx.strokeStyle = rgbStr(c1);
-    oCtx.lineWidth = Math.max(2, 3 * scaleFactor);
-    oCtx.stroke();
-  } else if (style === 'mirror_horizon') {
-    // 4. Symmetrical Horizon: Equal top & bottom mirrored spectrum bars + center horizon beam
-    const barAreaW = w * 0.84;
-    const startX = -barAreaW / 2;
-    const maxHalfH = h * 0.13;
-    const step = barAreaW / nBars;
-    const barW = Math.max(2, step * 0.58);
-
-    const lineGrad = oCtx.createLinearGradient(startX, 0, -startX, 0);
-    lineGrad.addColorStop(0, rgbStr(c1, 0.9));
-    lineGrad.addColorStop(1, rgbStr(c2, 0.9));
-    oCtx.fillStyle = lineGrad;
-    oCtx.fillRect(startX, -Math.max(1, 1.5 * scaleFactor), barAreaW, Math.max(2, 3 * scaleFactor));
-
-    for (let i = 0; i < nBars; i++) {
-      const val = specCol[i] ?? 0;
-      const ratio = i / Math.max(1, nBars - 1);
-      const col = lerpColor(c1, c2, ratio);
-      const halfH = Math.max(
-        3 * scaleFactor,
-        Math.pow(val, 1.28) * maxHalfH * (1.0 + bassVal * 0.35)
-      );
-      const x = startX + i * step;
-
-      oCtx.fillStyle = rgbStr(col);
-      oCtx.fillRect(x, -halfH, barW, halfH * 2);
-    }
-  } else if (style === 'pulse_rings') {
-    // 5. Concentric Pulse Rings: 3 harmonic frequency-modulated rings (Bass, Mid, High)
-    const minDim = Math.min(w, h);
-    const bandSlices = [
-      { start: 0, end: 18, baseR: minDim * 0.12, ampScale: minDim * 0.045, col: c1, lw: 3.5 },
-      { start: 18, end: 42, baseR: minDim * 0.21, ampScale: minDim * 0.055, col: lerpColor(c1, c2, 0.5), lw: 3.0 },
-      { start: 42, end: 64, baseR: minDim * 0.30, ampScale: minDim * 0.05, col: c2, lw: 2.5 },
+  } else if (style === 'layered_fluid') {
+    // 2. Layered Overlapping Fluid Waves (3 translucent organic Bezier ribbons)
+    const ptsCount = 56;
+    const maxAmp = h * 0.14;
+    const layers = [
+      { phase: 0.0, scale: 1.0, col: c1, alpha: 0.55 },
+      { phase: 1.4, scale: 0.82, col: cMid, alpha: 0.62 },
+      { phase: 2.8, scale: 0.68, col: c2, alpha: 0.65 },
     ];
 
-    const ptsCount = 72;
-    for (let rIdx = 0; rIdx < bandSlices.length; rIdx++) {
-      const ring = bandSlices[rIdx];
-      const pulseR = ring.baseR * (1.0 + bassVal * (0.22 - rIdx * 0.04));
+    for (const layer of layers) {
+      const topPts: Array<[number, number]> = [];
+      const botPts: Array<[number, number]> = [];
+      for (let i = 0; i < ptsCount; i++) {
+        const u = i / (ptsCount - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const mod = 0.72 + 0.28 * Math.sin(u * Math.PI * 5 + framePhase * 0.11 + layer.phase);
+        const amp = Math.pow(val, 1.15) * maxAmp * layer.scale * mod * taperEnvelope(u) * (1.0 + bassVal * 0.25);
+        topPts.push([x, -amp]);
+        botPts.push([x, amp * 0.72]);
+      }
+
       oCtx.beginPath();
-      for (let p = 0; p <= ptsCount; p++) {
-        const t = p / ptsCount;
-        const angle = t * Math.PI * 2;
-        const bandPos =
-          ring.start + ((p % ptsCount) / ptsCount) * (ring.end - ring.start);
-        const b0 = Math.floor(bandPos) % nBars;
-        const b1 = (b0 + 1) % nBars;
-        const frac = bandPos - Math.floor(bandPos);
-        const val = (specCol[b0] ?? 0) * (1 - frac) + (specCol[b1] ?? 0) * frac;
-        const radius = pulseR + Math.pow(val, 1.2) * ring.ampScale;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        if (p === 0) oCtx.moveTo(x, y);
-        else oCtx.lineTo(x, y);
+      oCtx.moveTo(topPts[0][0], topPts[0][1]);
+      for (let i = 1; i < topPts.length - 1; i++) {
+        const xc = (topPts[i][0] + topPts[i + 1][0]) / 2;
+        const yc = (topPts[i][1] + topPts[i + 1][1]) / 2;
+        oCtx.quadraticCurveTo(topPts[i][0], topPts[i][1], xc, yc);
+      }
+      oCtx.lineTo(topPts[topPts.length - 1][0], topPts[topPts.length - 1][1]);
+      for (let i = botPts.length - 1; i > 0; i--) {
+        const xc = (botPts[i][0] + botPts[i - 1][0]) / 2;
+        const yc = (botPts[i][1] + botPts[i - 1][1]) / 2;
+        oCtx.quadraticCurveTo(botPts[i][0], botPts[i][1], xc, yc);
       }
       oCtx.closePath();
-      oCtx.strokeStyle = rgbStr(ring.col);
-      oCtx.lineWidth = Math.max(2, ring.lw * scaleFactor);
-      oCtx.stroke();
-    }
-  } else if (style === 'particle_burst') {
-    // 6. Particle Burst: 64 radial glowing nodes + inner energy core + connecting rays
-    const minDim = Math.min(w, h);
-    const innerR = minDim * 0.11 * (1.0 + bassVal * 0.24);
-    const maxDist = minDim * 0.24;
-    const rotOffset = frameSeed * 0.012;
-
-    oCtx.beginPath();
-    oCtx.arc(0, 0, innerR, 0, Math.PI * 2);
-    oCtx.strokeStyle = rgbStr(c1, 0.85);
-    oCtx.lineWidth = Math.max(2, 2.5 * scaleFactor);
-    oCtx.stroke();
-
-    for (let i = 0; i < nBars; i++) {
-      const val = specCol[i] ?? 0;
-      const ratio = i / Math.max(1, nBars - 1);
-      const col = lerpColor(c1, c2, ratio);
-      const angle = (i * 2 * Math.PI) / nBars + rotOffset;
-      const dist = innerR + Math.pow(val, 1.25) * maxDist * (1.0 + bassVal * 0.25);
-
-      const x1 = Math.cos(angle) * innerR;
-      const y1 = Math.sin(angle) * innerR;
-      const x2 = Math.cos(angle) * dist;
-      const y2 = Math.sin(angle) * dist;
-
-      oCtx.strokeStyle = rgbStr(col, 0.45);
-      oCtx.lineWidth = Math.max(1, 1.8 * scaleFactor);
-      oCtx.beginPath();
-      oCtx.moveTo(x1, y1);
-      oCtx.lineTo(x2, y2);
-      oCtx.stroke();
-
-      const dotR = Math.max(2.5, (3.5 + val * 6.5) * scaleFactor);
-      oCtx.fillStyle = rgbStr(col);
-      oCtx.beginPath();
-      oCtx.arc(x2, y2, dotR, 0, Math.PI * 2);
-      oCtx.fill();
-
-      oCtx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      oCtx.beginPath();
-      oCtx.arc(x2, y2, dotR * 0.42, 0, Math.PI * 2);
+      oCtx.fillStyle = rgbStr(layer.col, layer.alpha);
       oCtx.fill();
     }
-  } else if (style === 'dual_ribbon') {
-    // 7. Dual Harmonic Ribbon: Two intertwined phase-shifted neon spline curves
-    const spanW = w * 0.86;
-    const xStart = -spanW / 2;
-    const maxAmp = h * 0.14;
-    const dxStep = spanW / Math.max(1, nBars - 1);
+  } else if (style === 'dot_halftone') {
+    // 3. Symmetrical Halftone Dot Columns
+    const cols = 54;
+    const stepX = spanW / cols;
+    const maxHalfH = h * 0.14;
+    const dotStepY = Math.max(4.5, 6.5 * scaleFactor);
 
-    const drawRibbon = (phaseSign: number, color: [number, number, number], lw: number) => {
-      oCtx.beginPath();
-      for (let i = 0; i < nBars; i++) {
-        const val = specCol[i] ?? 0;
-        const x = xStart + i * dxStep;
-        const waveMod = Math.sin(i * 0.35 + frameSeed * 0.15 * phaseSign);
-        const y =
-          phaseSign *
-          Math.pow(val, 1.15) *
-          maxAmp *
-          (0.65 + 0.35 * waveMod) *
-          (1.0 + bassVal * 0.32);
-        if (i === 0) {
-          oCtx.moveTo(x, y);
-        } else {
-          const prevX = xStart + (i - 1) * dxStep;
-          const prevVal = specCol[i - 1] ?? 0;
-          const prevWave = Math.sin((i - 1) * 0.35 + frameSeed * 0.15 * phaseSign);
-          const prevY =
-            phaseSign *
-            Math.pow(prevVal, 1.15) *
-            maxAmp *
-            (0.65 + 0.35 * prevWave) *
-            (1.0 + bassVal * 0.32);
-          const xc = (prevX + x) / 2;
-          const yc = (prevY + y) / 2;
-          oCtx.quadraticCurveTo(prevX, prevY, xc, yc);
+    for (let i = 0; i < cols; i++) {
+      const u = i / (cols - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const halfH = Math.max(dotStepY, Math.pow(val, 1.2) * maxHalfH * taperEnvelope(u) * (1 + bassVal * 0.28));
+      const x = xStart + (i + 0.5) * stepX;
+      const numDots = Math.max(1, Math.floor(halfH / dotStepY));
+
+      for (let d = 0; d <= numDots; d++) {
+        const distFrac = d / Math.max(1, numDots);
+        const r = Math.max(1.2, (3.2 * (1 - distFrac * 0.62)) * scaleFactor);
+        oCtx.fillStyle = rgbStr(col, 0.95 - distFrac * 0.35);
+        oCtx.beginPath();
+        oCtx.arc(x, -d * dotStepY, r, 0, Math.PI * 2);
+        if (d > 0) oCtx.arc(x, d * dotStepY, r, 0, Math.PI * 2);
+        oCtx.fill();
+      }
+    }
+  } else if (style === 'pixel_grid') {
+    // 4. Symmetrical 3D LED Pixel Blocks
+    const cols = 48;
+    const stepX = spanW / cols;
+    const cellW = Math.max(3, stepX * 0.62);
+    const cellH = Math.max(3, cellW * 0.72);
+    const gapY = Math.max(1.5, cellH * 0.32);
+    const maxHalfCells = 8;
+
+    for (let i = 0; i < cols; i++) {
+      const u = i / (cols - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const hiCol = lerpColor(col, [255, 255, 255], 0.45);
+      const count = Math.max(
+        1,
+        Math.min(maxHalfCells, Math.round(Math.pow(val, 1.18) * maxHalfCells * taperEnvelope(u) * (1 + bassVal * 0.25)))
+      );
+      const x = xStart + i * stepX + (stepX - cellW) / 2;
+
+      for (let b = 0; b < count; b++) {
+        const offset = b * (cellH + gapY);
+        const isTip = b === count - 1;
+        oCtx.fillStyle = isTip ? rgbStr(hiCol, 0.95) : rgbStr(col, 0.9);
+        oCtx.fillRect(x, -offset - cellH / 2, cellW, cellH);
+        if (b > 0) {
+          oCtx.fillRect(x, offset - cellH / 2, cellW, cellH);
         }
       }
-      oCtx.strokeStyle = rgbStr(color);
-      oCtx.lineWidth = Math.max(2.5, lw * scaleFactor);
-      oCtx.lineCap = 'round';
-      oCtx.stroke();
-    };
+    }
+  } else if (style === 'mesh_ribbon') {
+    // 5. 3D Twisted Dotted Mesh Ribbon (multi-strand flowing particle net)
+    const strands = 10;
+    const pts = 84;
+    const maxAmp = h * 0.14;
 
-    drawRibbon(-1, c1, 4.5);
-    drawRibbon(1, c2, 4.0);
-  } else if (style === 'matrix_blocks') {
-    // 8. Matrix LED Blocks: Stacked segmented equalizer cells per band
-    const barAreaW = w * 0.84;
-    const startX = -barAreaW / 2;
-    const maxBlocks = 14;
-    const totalH = h * 0.22;
-    const step = barAreaW / nBars;
-    const blockW = Math.max(2, step * 0.64);
-    const cellStep = totalH / maxBlocks;
-    const blockH = Math.max(2, cellStep * 0.68);
-
-    for (let i = 0; i < nBars; i++) {
-      const val = specCol[i] ?? 0;
-      const ratio = i / Math.max(1, nBars - 1);
-      const col = lerpColor(c1, c2, ratio);
-      const activeCount = Math.max(
-        1,
-        Math.min(maxBlocks, Math.round(Math.pow(val, 1.2) * maxBlocks * (1.0 + bassVal * 0.25)))
-      );
-      const x = startX + i * step;
-
-      for (let b = 0; b < activeCount; b++) {
-        const y = -b * cellStep - blockH;
-        const isPeak = b === activeCount - 1;
-        oCtx.fillStyle = isPeak ? 'rgba(255, 255, 255, 0.92)' : rgbStr(col);
-        oCtx.fillRect(x, y, blockW, blockH);
+    for (let s = 0; s < strands; s++) {
+      const sFrac = s / (strands - 1);
+      const strandPhase = (sFrac - 0.5) * 2.1;
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = Math.max(0.14, sampleSpec(specCol, u));
+        const col = lerpColor(c1, c2, u);
+        const twist = Math.sin(u * Math.PI * 3.5 + framePhase * 0.08 + strandPhase);
+        const y =
+          twist *
+          Math.pow(val, 0.92) *
+          maxAmp *
+          taperEnvelope(u) *
+          (1 + bassVal * 0.25);
+        const dotR = Math.max(1.3, (2.1 + val * 1.3) * scaleFactor);
+        oCtx.fillStyle = rgbStr(col, 0.68 + 0.32 * (1 - Math.abs(sFrac - 0.5)));
+        oCtx.beginPath();
+        oCtx.arc(x, y, dotR, 0, Math.PI * 2);
+        oCtx.fill();
       }
     }
+  } else if (style === 'smooth_osc') {
+    // 6. Smooth Continuous Organic Bezier Wave Stroke
+    const pts = 88;
+    const maxAmp = h * 0.15;
+    oCtx.beginPath();
+    for (let i = 0; i < pts; i++) {
+      const u = i / (pts - 1);
+      const x = xStart + u * spanW;
+      const val = sampleSpec(specCol, u);
+      const osc = Math.sin(u * Math.PI * 10 + framePhase * 0.16);
+      const y = osc * Math.pow(val, 1.1) * maxAmp * taperEnvelope(u) * (1 + bassVal * 0.28);
+      if (i === 0) {
+        oCtx.moveTo(x, y);
+      } else {
+        const pu = (i - 1) / (pts - 1);
+        const px = xStart + pu * spanW;
+        const pVal = sampleSpec(specCol, pu);
+        const py =
+          Math.sin(pu * Math.PI * 10 + framePhase * 0.16) *
+          Math.pow(pVal, 1.1) *
+          maxAmp *
+          taperEnvelope(pu) *
+          (1 + bassVal * 0.28);
+        oCtx.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
+      }
+    }
+    oCtx.strokeStyle = makeSpanGrad(0.95);
+    oCtx.lineWidth = Math.max(2.5, 4.2 * scaleFactor);
+    oCtx.lineCap = 'round';
+    oCtx.lineJoin = 'round';
+    oCtx.stroke();
+  } else if (style === 'mirror_needles') {
+    // 7. Crisp Symmetrical Vertical Needles
+    const count = 88;
+    const step = spanW / count;
+    const maxHalfH = h * 0.15;
+    oCtx.lineWidth = Math.max(1.5, 2.6 * scaleFactor);
+    oCtx.lineCap = 'round';
+
+    for (let i = 0; i < count; i++) {
+      const u = i / (count - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const halfH = Math.max(2 * scaleFactor, Math.pow(val, 1.25) * maxHalfH * taperEnvelope(u) * (1 + bassVal * 0.3));
+      const x = xStart + (i + 0.5) * step;
+
+      oCtx.strokeStyle = rgbStr(col, 0.95);
+      oCtx.beginPath();
+      oCtx.moveTo(x, -halfH);
+      oCtx.lineTo(x, halfH);
+      oCtx.stroke();
+    }
+  } else if (style === 'silk_aura') {
+    // 8. Soft Feathered Silk Aurora Curtain
+    const count = 120;
+    const step = spanW / count;
+    const maxHalfH = h * 0.16;
+    oCtx.lineWidth = Math.max(1.5, step * 0.95);
+
+    for (let i = 0; i < count; i++) {
+      const u = i / (count - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const halfH = Math.max(4 * scaleFactor, Math.pow(val, 1.12) * maxHalfH * Math.sin(u * Math.PI) * (1 + bassVal * 0.28));
+      const x = xStart + i * step;
+
+      const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
+      vGrad.addColorStop(0, rgbStr(col, 0));
+      vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.25), 0.72));
+      vGrad.addColorStop(1, rgbStr(col, 0));
+
+      oCtx.strokeStyle = vGrad;
+      oCtx.beginPath();
+      oCtx.moveTo(x, -halfH);
+      oCtx.lineTo(x, halfH);
+      oCtx.stroke();
+    }
+  } else if (style === 'prism_peaks') {
+    // 9. Symmetrical Translucent Prism/Crystal Peaks
+    const pts = 34;
+    const maxAmp = h * 0.14;
+    const layers = [
+      { mult: 1.0, shift: 0, col: c2, alpha: 0.55 },
+      { mult: 0.75, shift: 1.2, col: c1, alpha: 0.65 },
+      { mult: 0.48, shift: 2.4, col: cMid, alpha: 0.75 },
+    ];
+
+    for (const l of layers) {
+      oCtx.beginPath();
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const mod = 0.7 + 0.3 * Math.sin(u * 14 + framePhase * 0.1 + l.shift);
+        const y = -Math.pow(val, 1.2) * maxAmp * l.mult * mod * taperEnvelope(u) * (1 + bassVal * 0.25);
+        if (i === 0) oCtx.moveTo(x, y);
+        else oCtx.lineTo(x, y);
+      }
+      for (let i = pts - 1; i >= 0; i--) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const mod = 0.7 + 0.3 * Math.sin(u * 14 + framePhase * 0.1 + l.shift);
+        const y = Math.pow(val, 1.2) * maxAmp * l.mult * mod * taperEnvelope(u) * (1 + bassVal * 0.25);
+        oCtx.lineTo(x, y);
+      }
+      oCtx.closePath();
+      oCtx.fillStyle = rgbStr(l.col, l.alpha);
+      oCtx.fill();
+    }
+  } else if (style === 'brush_spectrum') {
+    // 10. Painterly Dense Brush Spectrum Band
+    const count = 110;
+    const step = spanW / count;
+    const maxHalfH = h * 0.14;
+
+    for (let i = 0; i < count; i++) {
+      const u = i / (count - 1);
+      const val = sampleSpec(specCol, u);
+      const col = lerpColor(c1, c2, u);
+      const micro = 0.68 + 0.32 * Math.abs(Math.sin(i * 1.7 + framePhase * 0.12));
+      const halfH = Math.max(2 * scaleFactor, Math.pow(val, 1.15) * maxHalfH * micro * taperEnvelope(u) * (1 + bassVal * 0.28));
+      const x = xStart + i * step;
+
+      oCtx.fillStyle = rgbStr(col, 0.78);
+      oCtx.fillRect(x, -halfH, Math.max(1.8, step * 0.85), halfH * 2);
+      oCtx.fillStyle = rgbStr(lerpColor(col, [255, 255, 255], 0.35), 0.5);
+      oCtx.fillRect(x, -halfH * 0.45, Math.max(1.8, step * 0.85), halfH * 0.9);
+    }
+  } else if (style === 'harmonic_waves') {
+    // 11. Overlapping Harmonic Ribbons with Outlined Crests
+    const pts = 68;
+    const maxAmp = h * 0.135;
+    const bands = [
+      { freq: 3.0, phase: 0.0, col: c1, fillAlpha: 0.22 },
+      { freq: 4.5, phase: 1.5, col: cMid, fillAlpha: 0.24 },
+      { freq: 6.0, phase: 3.0, col: c2, fillAlpha: 0.24 },
+    ];
+
+    for (const b of bands) {
+      const top: Array<[number, number]> = [];
+      const bot: Array<[number, number]> = [];
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const wave = Math.sin(u * Math.PI * b.freq + framePhase * 0.09 + b.phase);
+        const amp = Math.pow(val, 1.15) * maxAmp * taperEnvelope(u) * (1 + bassVal * 0.24);
+        top.push([x, wave * amp]);
+        bot.push([x, -wave * amp * 0.65]);
+      }
+
+      oCtx.beginPath();
+      oCtx.moveTo(top[0][0], top[0][1]);
+      for (let i = 1; i < top.length; i++) oCtx.lineTo(top[i][0], top[i][1]);
+      for (let i = bot.length - 1; i >= 0; i--) oCtx.lineTo(bot[i][0], bot[i][1]);
+      oCtx.closePath();
+      oCtx.fillStyle = rgbStr(b.col, b.fillAlpha);
+      oCtx.fill();
+
+      oCtx.beginPath();
+      oCtx.moveTo(top[0][0], top[0][1]);
+      for (let i = 1; i < top.length; i++) oCtx.lineTo(top[i][0], top[i][1]);
+      oCtx.strokeStyle = rgbStr(b.col, 0.9);
+      oCtx.lineWidth = Math.max(1.5, 2.2 * scaleFactor);
+      oCtx.stroke();
+    }
+  } else if (style === 'dot_mountains') {
+    // 12. 3D Perspective Dotted Mountain Peaks
+    const rows = 10;
+    const cols = 60;
+    const maxAmp = h * 0.175;
+    const baseLineY = maxAmp * 0.25;
+
+    for (let i = 0; i < cols; i++) {
+      const u = i / (cols - 1);
+      const val = Math.max(0.14, sampleSpec(specCol, u));
+      const col = lerpColor(c1, c2, u);
+      const crestMod = 0.76 + 0.24 * Math.sin(u * Math.PI * 6 + framePhase * 0.08);
+      const peakH = Math.max(
+        10 * scaleFactor,
+        Math.pow(val, 0.92) * maxAmp * crestMod * taperEnvelope(u) * (1 + bassVal * 0.32)
+      );
+
+      for (let r = 0; r < rows; r++) {
+        const frac = r / (rows - 1); // 0 = baseline front, 1 = mountain crest
+        const xShift = (frac - 0.5) * 16 * scaleFactor;
+        const x = xStart + u * spanW + xShift;
+        const y = baseLineY - Math.pow(frac, 0.85) * peakH - frac * 6 * scaleFactor;
+        const dotR = Math.max(1.3, (1.8 + frac * 1.4) * scaleFactor);
+
+        oCtx.fillStyle = rgbStr(col, 0.42 + frac * 0.56);
+        oCtx.beginPath();
+        oCtx.arc(x, y, dotR, 0, Math.PI * 2);
+        oCtx.fill();
+      }
+    }
+  } else if (style === 'double_flame') {
+    // 13. Bold Symmetrical Double Flame Wave Silhouettes
+    const pts = 64;
+    const maxAmp = h * 0.15;
+    const layers = [
+      { mult: 1.0, col: c2, alpha: 0.72, shift: 0 },
+      { mult: 0.66, col: c1, alpha: 0.85, shift: 0.9 },
+    ];
+
+    for (const l of layers) {
+      oCtx.beginPath();
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const spike = 0.65 + 0.35 * Math.sin(u * Math.PI * 16 + framePhase * 0.12 + l.shift);
+        const y = -Math.pow(val, 1.25) * maxAmp * l.mult * spike * taperEnvelope(u) * (1 + bassVal * 0.28);
+        if (i === 0) oCtx.moveTo(x, y);
+        else oCtx.lineTo(x, y);
+      }
+      for (let i = pts - 1; i >= 0; i--) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const spike = 0.65 + 0.35 * Math.sin(u * Math.PI * 16 + framePhase * 0.12 + l.shift);
+        const y = Math.pow(val, 1.25) * maxAmp * l.mult * spike * taperEnvelope(u) * (1 + bassVal * 0.28);
+        oCtx.lineTo(x, y);
+      }
+      oCtx.closePath();
+      oCtx.fillStyle = rgbStr(l.col, l.alpha);
+      oCtx.fill();
+    }
+  } else if (style === 'triple_sine') {
+    // 14. Three Intertwined Glowing Sine Ribbons
+    const pts = 88;
+    const maxAmp = h * 0.13;
+    const ribbons = [
+      { phase: 0.0, col: c1, lw: 3.6 },
+      { phase: 2.1, col: cMid, lw: 3.2 },
+      { phase: 4.2, col: c2, lw: 3.4 },
+    ];
+
+    for (const r of ribbons) {
+      oCtx.beginPath();
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const val = sampleSpec(specCol, u);
+        const y =
+          Math.sin(u * Math.PI * 7 + framePhase * 0.12 + r.phase) *
+          Math.pow(val, 1.05) *
+          maxAmp *
+          taperEnvelope(u) *
+          (1 + bassVal * 0.25);
+        if (i === 0) oCtx.moveTo(x, y);
+        else oCtx.lineTo(x, y);
+      }
+      oCtx.strokeStyle = rgbStr(r.col, 0.94);
+      oCtx.lineWidth = Math.max(2, r.lw * scaleFactor);
+      oCtx.lineCap = 'round';
+      oCtx.lineJoin = 'round';
+      oCtx.stroke();
+    }
+  } else if (style === 'seismic_line') {
+    // 15. Symmetrical High-Detail Seismic Pulse Line
+    const pts = 112;
+    const maxAmp = h * 0.15;
+    oCtx.beginPath();
+    for (let i = 0; i < pts; i++) {
+      const u = i / (pts - 1);
+      const x = xStart + u * spanW;
+      const val = sampleSpec(specCol, u);
+      const carrier =
+        Math.sin(u * Math.PI * 24 + framePhase * 0.18) * 0.7 +
+        Math.cos(u * Math.PI * 11 - framePhase * 0.11) * 0.3;
+      const y = carrier * Math.pow(val, 1.2) * maxAmp * Math.sin(u * Math.PI) * (1 + bassVal * 0.28);
+      if (i === 0) oCtx.moveTo(x, y);
+      else oCtx.lineTo(x, y);
+    }
+    oCtx.strokeStyle = makeSpanGrad(0.96);
+    oCtx.lineWidth = Math.max(1.8, 2.8 * scaleFactor);
+    oCtx.lineJoin = 'round';
+    oCtx.lineCap = 'round';
+    oCtx.stroke();
   }
 
   oCtx.restore();

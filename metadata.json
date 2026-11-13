@@ -2,5 +2,7 @@
   "name": "MixImage Studio",
   "description": "ระบบสร้างวิดีโอซิ้งจังหวะเบสและคลื่นเสียงเรืองแสงอัตโนมัติ พร้อมชุดโค้ด GitHub Actions Cloud Rendering",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

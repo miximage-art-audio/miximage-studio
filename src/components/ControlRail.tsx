@@ -6,7 +6,6 @@ import {
   BASS_INTENSITY_PRESETS,
   COLOR_THEMES,
   ColorThemeKey,
-  DEMO_ARTWORKS,
   FIT_MODES,
   FitMode,
   FpsOption,
@@ -17,6 +16,7 @@ import {
   WaveformStyle,
   clampWaveformLayout,
 } from '../engine/presets';
+import { DEMO_ARTWORKS } from '../engine/demoArtworks';
 
 interface ControlRailProps {
   selectedArtworkId: string;
@@ -256,16 +256,16 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
       <hr className="border-slate-800/80" />
 
-      {/* 3. Waveform Style (8 styles) & Color Theme */}
-      <div className="flex flex-col gap-2">
+      {/* 3. Waveform Style (15 styles) & Color Theme */}
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
-            3. รูปแบบคลื่นเสียง (8 แบบ) และโทนสี
+            3. รูปแบบคลื่นเสียง (15 แบบ) และโทนสี
           </h2>
           <span className="text-[11px] font-mono text-slate-400">{style}</span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
           {WAVEFORM_STYLES.map((item) => {
             const active = style === item.key;
             return (
@@ -274,17 +274,14 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeStyle(item.key)}
                 aria-pressed={active}
-                title={item.description}
-                className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                title={`${item.label} (${item.key}) — ${item.description}`}
+                className={`px-1.5 py-1.5 rounded-md border text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
-                <div className="text-[11px] font-semibold truncate">{item.label}</div>
-                <div className="text-[10px] font-mono text-slate-400 truncate">
-                  {item.key}
-                </div>
+                <div className="text-[11px] font-medium truncate">{item.label}</div>
               </button>
             );
           })}
