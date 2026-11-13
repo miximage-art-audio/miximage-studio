@@ -10,15 +10,19 @@ import {
   WaveformStyle,
 } from '../engine/presets';
 import { createRenderSurface, renderStudioFrame } from '../engine/renderer';
+import {
+  findSupportedRecordingFormat,
+  RecordingFormat,
+  resolveRecordingFormat,
+} from '../engine/recordingFormat';
 
 interface RenderExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   imageEl: HTMLImageElement | null;
   audioSamples: Float32Array | null;
+  audioBuffer: AudioBuffer | null;
   audioSampleRate: number;
-  audioWavOrFile: Blob | null;
-  audioFilename: string;
   cachedDsp: DspAnalysisResult | null;
   ratio: AspectRatioKey;
   fitMode: FitMode;
@@ -28,15 +32,27 @@ interface RenderExportModalProps {
   fps: FpsOption;
 }
 
-type RenderStatus = 'idle' | 'rendering-frames' | 'encoding-ffmpeg' | 'done' | 'error';
+type RenderStatus = 'idle' | 'rendering' | 'done' | 'error';
+
+function getBrowserRecordingFormat(): RecordingFormat | null {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return null;
+  }
+  return findSupportedRecordingFormat((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+function getAudioContextConstructor(): typeof AudioContext | null {
+  const browserWindow = window as Window & { webkitAudioContext?: typeof AudioContext };
+  return window.AudioContext || browserWindow.webkitAudioContext || null;
+}
 
 export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   isOpen,
   onClose,
   imageEl,
   audioSamples,
+  audioBuffer,
   audioSampleRate,
-  audioWavOrFile,
   cachedDsp,
   ratio,
   fitMode,
@@ -50,149 +66,245 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const [progressPct, setProgressPct] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoFormat, setVideoFormat] = useState<RecordingFormat | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const supportedFormat = getBrowserRecordingFormat();
+  const captureStreamSupported =
+    typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype;
 
   if (!isOpen) return null;
 
   const baseSpec = ASPECT_RATIOS[ratio];
   const scale = resolutionScale === '1080p' ? 1 : 2 / 3;
-  // Ensure even dimensions for H.264 yuv420p
   const outW = Math.floor((baseSpec.width * scale) / 2) * 2;
   const outH = Math.floor((baseSpec.height * scale) / 2) * 2;
 
   const handleClose = () => {
-    if (status === 'rendering-frames' || status === 'encoding-ffmpeg') return;
+    if (status === 'rendering') return;
     if (videoUrl) {
       URL.revokeObjectURL(videoUrl);
       setVideoUrl(null);
     }
+    setVideoFormat(null);
     setStatus('idle');
     setProgressPct(0);
+    setStatusText('');
     setErrorMsg(null);
     onClose();
   };
 
   const handleStartRender = async () => {
-    if (!imageEl || !audioSamples || !audioWavOrFile) {
+    if (!imageEl || !audioSamples) {
       setErrorMsg('กรุณาเลือกรูปภาพและไฟล์เสียงก่อนเริ่มเรนเดอร์');
       setStatus('error');
       return;
     }
+
+    if (!supportedFormat) {
+      setErrorMsg('เบราว์เซอร์นี้ไม่มี MediaRecorder ที่รองรับ MP4 หรือ WebM กรุณาเปิดด้วยเบราว์เซอร์รุ่นใหม่');
+      setStatus('error');
+      return;
+    }
+
+    if (!captureStreamSupported) {
+      setErrorMsg('เบราว์เซอร์นี้ไม่รองรับ Canvas captureStream จึงยังบันทึกวิดีโอในหน้าเว็บนี้ไม่ได้');
+      setStatus('error');
+      return;
+    }
+
+    const AudioContextConstructor = getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      setErrorMsg('เบราว์เซอร์นี้ไม่รองรับ Web Audio API สำหรับรวมเพลงลงในวิดีโอ');
+      setStatus('error');
+      return;
+    }
+
+    let audioContext: AudioContext | null = null;
+    let source: AudioBufferSourceNode | null = null;
+    let recordingStream: MediaStream | null = null;
+    let animationFrameId = 0;
 
     try {
       if (videoUrl) {
         URL.revokeObjectURL(videoUrl);
         setVideoUrl(null);
       }
-
+      setVideoFormat(null);
       setErrorMsg(null);
-      setStatus('rendering-frames');
-      setProgressPct(2);
+      setStatus('rendering');
+      setProgressPct(0);
       setStatusText('กำลังเตรียมข้อมูลคลื่นความถี่เบส...');
 
-      // Reuse already-analyzed DSP data if FPS matches
       const dsp: DspAnalysisResult =
         cachedDsp && cachedDsp.fps === fps
           ? cachedDsp
           : analyzeAudioSamples(audioSamples, audioSampleRate, fps, 64);
-      const totalFrames = dsp.totalFrames;
-
-      // 1. Start server FFmpeg render session
-      const startForm = new FormData();
-      startForm.append('audio', audioWavOrFile, 'master_audio.wav');
-      startForm.append('fps', String(fps));
-      startForm.append('width', String(outW));
-      startForm.append('height', String(outH));
-
-      const startRes = await fetch('/api/render/start', {
-        method: 'POST',
-        body: startForm,
-      });
-      if (!startRes.ok) {
-        const err = await startRes.json().catch(() => ({}));
-        throw new Error(err.error || 'ไม่สามารถเริ่มงานเรนเดอร์บนเซิร์ฟเวอร์ได้');
-      }
-      const { jobId } = (await startRes.json()) as { jobId: string };
-
-      // 2. Render frames on offscreen canvas and upload in chunks of 48 frames
       const surface = createRenderSurface(imageEl, outW, outH, fitMode);
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = outW;
-      offCanvas.height = outH;
-      const ctx = offCanvas.getContext('2d', { alpha: false })!;
+      const renderCanvas = document.createElement('canvas');
+      renderCanvas.width = outW;
+      renderCanvas.height = outH;
+      const renderCtx = renderCanvas.getContext('2d', { alpha: false });
+      if (!renderCtx) throw new Error('สร้าง Canvas สำหรับเรนเดอร์ไม่สำเร็จ');
 
       const specCol = new Float32Array(64);
-      const chunkSize = 48;
-      let batch: Blob[] = [];
-
-      const flushBatch = async () => {
-        if (batch.length === 0) return;
-        const form = new FormData();
-        batch.forEach((b, idx) => form.append('frames', b, `f_${idx}.jpg`));
-        const res = await fetch(`/api/render/${jobId}/frames`, {
-          method: 'POST',
-          body: form,
-        });
-        if (!res.ok) {
-          throw new Error('ส่งเฟรมภาพไปยัง FFmpeg ไม่สำเร็จ');
+      const drawFrame = (frameIndex: number) => {
+        const safeFrameIndex = Math.max(0, Math.min(dsp.totalFrames - 1, frameIndex));
+        for (let band = 0; band < 64; band++) {
+          specCol[band] = dsp.melSpec[band][safeFrameIndex] ?? 0;
         }
-        batch = [];
+        renderStudioFrame(
+          renderCtx,
+          surface,
+          specCol,
+          dsp.bassEnv[safeFrameIndex] ?? 0,
+          style,
+          theme,
+          bassIntensity,
+          safeFrameIndex
+        );
+      };
+      drawFrame(0);
+
+      const canvasStream = renderCanvas.captureStream(fps);
+      audioContext = new AudioContextConstructor();
+      await audioContext.resume();
+      const exportAudioBuffer = audioBuffer ?? audioContext.createBuffer(
+        1,
+        audioSamples.length,
+        audioSampleRate
+      );
+      if (!audioBuffer) exportAudioBuffer.getChannelData(0).set(audioSamples);
+
+      const durationSec = Math.min(dsp.durationSec, exportAudioBuffer.duration);
+      if (!Number.isFinite(durationSec) || durationSec <= 0 || dsp.totalFrames <= 0) {
+        throw new Error('ไฟล์เสียงไม่มีความยาวที่ใช้เรนเดอร์ได้');
+      }
+
+      const audioDestination = audioContext.createMediaStreamDestination();
+      source = audioContext.createBufferSource();
+      source.buffer = exportAudioBuffer;
+      source.connect(audioDestination);
+      recordingStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDestination.stream.getAudioTracks(),
+      ]);
+
+      const recorder = new MediaRecorder(recordingStream, {
+        mimeType: supportedFormat.mimeType,
+        videoBitsPerSecond: resolutionScale === '1080p' ? 8_000_000 : 5_000_000,
+        audioBitsPerSecond: 256_000,
+      });
+      const chunks: Blob[] = [];
+      let recorderError: Error | null = null;
+      let lastRenderedFrame = 0;
+      let lastProgressUpdate = 0;
+      const stopRecorderIfActive = () => {
+        if (recorder.state !== 'inactive') recorder.stop();
       };
 
-      for (let f = 0; f < totalFrames; f++) {
-        for (let b = 0; b < 64; b++) {
-          specCol[b] = dsp.melSpec[b][f] ?? 0;
-        }
-        const bassVal = dsp.bassEnv[f] ?? 0;
-        renderStudioFrame(ctx, surface, specCol, bassVal, style, theme, bassIntensity, f);
+      const recordedBlob = await new Promise<Blob>((resolve, reject) => {
+        recorder.ondataavailable = (event: BlobEvent) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
 
-        const blob = await new Promise<Blob>((resolve, reject) => {
-          offCanvas.toBlob(
-            (b) => (b ? resolve(b) : reject(new Error('สร้างเฟรม JPEG ไม่สำเร็จ'))),
-            'image/jpeg',
-            0.88
-          );
-        });
-        batch.push(blob);
+        recorder.onerror = () => {
+          recorderError = new Error('MediaRecorder เกิดข้อผิดพลาดระหว่างบันทึกวิดีโอ');
+          if (recorder.state !== 'inactive') recorder.stop();
+        };
 
-        if (batch.length >= chunkSize) {
-          await flushBatch();
-          const pct = Math.min(82, Math.round(((f + 1) / totalFrames) * 80) + 2);
-          setProgressPct(pct);
-          setStatusText(`กำลังเรนเดอร์เฟรม ${f + 1} / ${totalFrames} (${outW}×${outH} px)...`);
-        } else if (f % 8 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      }
+        recorder.onstop = () => {
+          if (recorderError) {
+            reject(recorderError);
+            return;
+          }
+          const actualFormat = resolveRecordingFormat(recorder.mimeType, supportedFormat);
+          if (!actualFormat) {
+            reject(new Error('เบราว์เซอร์รายงานชนิดไฟล์วิดีโอที่ไม่รู้จัก จึงยกเลิกการตั้งชื่อนามสกุลไฟล์เพื่อป้องกันไฟล์ผิดรูปแบบ'));
+            return;
+          }
+          const blob = new Blob(chunks, { type: actualFormat.mimeType || supportedFormat.mimeType });
+          if (blob.size === 0) {
+            reject(new Error('เบราว์เซอร์ไม่ได้สร้างข้อมูลวิดีโอ กรุณาลองใหม่อีกครั้ง'));
+            return;
+          }
+          setVideoFormat(actualFormat);
+          resolve(blob);
+        };
 
-      await flushBatch();
+        recorder.onstart = () => {
+          const startedAt = audioContext!.currentTime;
+          source!.onended = () => {
+            drawFrame(dsp.totalFrames - 1);
+            stopRecorderIfActive();
+          };
+          source!.start(startedAt);
+          setStatusText(`กำลังบันทึกภาพและเสียงในเบราว์เซอร์ ${outW}×${outH} px...`);
 
-      // 3. Finalize FFmpeg H.264 + AAC 320kbps MP4 encode
-      setStatus('encoding-ffmpeg');
-      setProgressPct(88);
-      setStatusText('กำลังเข้ารหัส H.264 (CRF 18) และรวมเสียง AAC 320kbps ด้วย FFmpeg...');
+          const tick = (now: number) => {
+            if (recorder.state === 'inactive') return;
+            const elapsed = Math.max(0, audioContext!.currentTime - startedAt);
+            const frameIndex = Math.min(
+              dsp.totalFrames - 1,
+              Math.floor(elapsed * fps)
+            );
+            if (frameIndex !== lastRenderedFrame) {
+              drawFrame(frameIndex);
+              lastRenderedFrame = frameIndex;
+            }
 
-      const finishRes = await fetch(`/api/render/${jobId}/finish`, {
-        method: 'POST',
+            if (now - lastProgressUpdate >= 120) {
+              lastProgressUpdate = now;
+              const nextProgress = Math.min(99, Math.floor((elapsed / durationSec) * 100));
+              setProgressPct(nextProgress);
+            }
+
+            if (elapsed >= durationSec) {
+              drawFrame(dsp.totalFrames - 1);
+              stopRecorderIfActive();
+              return;
+            }
+            animationFrameId = requestAnimationFrame(tick);
+          };
+          animationFrameId = requestAnimationFrame(tick);
+        };
+
+        recorder.start(1000);
       });
-      if (!finishRes.ok) {
-        const err = await finishRes.json().catch(() => ({}));
-        throw new Error(err.error || 'FFmpeg เข้ารหัส .MP4 ไม่สำเร็จ');
-      }
 
-      const mp4Blob = await finishRes.blob();
-      const url = URL.createObjectURL(mp4Blob);
+      const actualFormat = videoFormat ?? resolveRecordingFormat(recorder.mimeType, supportedFormat) ?? supportedFormat;
+      const url = URL.createObjectURL(recordedBlob);
       setVideoUrl(url);
+      setVideoFormat(actualFormat);
       setProgressPct(100);
       setStatus('done');
-      setStatusText('เรนเดอร์วิดีโอ .MP4 เสร็จสมบูรณ์');
+      setStatusText(
+        actualFormat.extension === 'mp4'
+          ? 'เรนเดอร์วิดีโอ .MP4 เสร็จสมบูรณ์'
+          : 'บันทึกเป็น .WEBM เสร็จสมบูรณ์ เนื่องจากเบราว์เซอร์นี้ไม่รองรับ MP4'
+      );
     } catch (err) {
       setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดระหว่างเรนเดอร์');
+    } finally {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (source) {
+        source.onended = null;
+        try {
+          source.stop();
+        } catch {
+          // The source may already have ended.
+        }
+        source.disconnect();
+      }
+      recordingStream?.getTracks().forEach((track) => track.stop());
+      if (audioContext && audioContext.state !== 'closed') {
+        await audioContext.close().catch(() => {});
+      }
     }
   };
 
-  const isBusy = status === 'rendering-frames' || status === 'encoding-ffmpeg';
+  const isBusy = status === 'rendering';
 
   return (
     <div
@@ -206,7 +318,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           <div className="flex items-center gap-2.5">
             <Film className="w-5 h-5 text-sky-400" aria-hidden="true" />
             <h2 id="render-modal-title" className="text-base font-semibold text-slate-50">
-              เรนเดอร์วิดีโอ .MP4 (H.264 + AAC 320kbps)
+              เรนเดอร์วิดีโอในเบราว์เซอร์
             </h2>
           </div>
           <button
@@ -221,7 +333,25 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         </div>
 
         <div className="p-5 flex flex-col gap-5">
-          {/* Summary of settings */}
+          <div
+            role="status"
+            className={`rounded-lg border p-3 text-xs leading-relaxed ${
+              !supportedFormat || !captureStreamSupported
+                ? 'border-rose-900/60 bg-rose-950/30 text-rose-300'
+                : supportedFormat.extension === 'mp4'
+                  ? 'border-emerald-900/60 bg-emerald-950/25 text-emerald-300'
+                  : 'border-amber-900/60 bg-amber-950/25 text-amber-200'
+            }`}
+          >
+            {!captureStreamSupported
+              ? 'เบราว์เซอร์นี้ไม่รองรับการจับภาพจาก Canvas'
+              : !supportedFormat
+                ? 'เบราว์เซอร์นี้ไม่รองรับการบันทึกวิดีโอด้วย MediaRecorder'
+                : supportedFormat.extension === 'mp4'
+                  ? 'เบราว์เซอร์นี้บันทึกเป็น .mp4 ได้ ไฟล์จะสร้างในเครื่องโดยตรง แต่ codec ที่ใช้ขึ้นกับเบราว์เซอร์ และอาจไม่ใช่ H.264/AAC'
+                  : 'เบราว์เซอร์นี้ไม่รองรับ MP4 สำหรับการบันทึก ระบบจะสร้างไฟล์ .webm และจะไม่ตั้งชื่อ WebM เป็น .mp4'}
+          </div>
+
           <div className="bg-[#090D16] border border-slate-800 rounded-lg p-3.5 text-xs text-slate-300 flex flex-wrap gap-x-4 gap-y-1.5 font-mono tabular-nums">
             <span>อัตราส่วน: {ratio}</span>
             <span>ขนาด: {outW}×{outH} px</span>
@@ -231,7 +361,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             <span>เบส: {bassIntensity.toFixed(1)}x</span>
           </div>
 
-          {/* Quality Selection */}
           {status === 'idle' && (
             <div className="flex flex-col gap-2">
               <span className="text-xs font-medium text-slate-300">
@@ -241,6 +370,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setResolutionScale('1080p')}
+                  aria-pressed={resolutionScale === '1080p'}
                   className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
                     resolutionScale === '1080p'
                       ? 'border-sky-400 bg-sky-500/15 text-slate-50'
@@ -255,6 +385,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setResolutionScale('720p')}
+                  aria-pressed={resolutionScale === '720p'}
                   className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
                     resolutionScale === '720p'
                       ? 'border-sky-400 bg-sky-500/15 text-slate-50'
@@ -270,7 +401,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             </div>
           )}
 
-          {/* Progress Bar */}
           {(isBusy || status === 'done') && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between text-xs">
@@ -286,8 +416,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             </div>
           )}
 
-          {/* Finished Video Preview */}
-          {status === 'done' && videoUrl && (
+          {status === 'done' && videoUrl && videoFormat && (
             <div className="flex flex-col gap-3">
               <video
                 src={videoUrl}
@@ -296,23 +425,21 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               />
               <a
                 href={videoUrl}
-                download={`miximage_${ratio.replace(':', 'x')}_${style}_${fps}fps.mp4`}
+                download={`miximage_${ratio.replace(':', 'x')}_${style}_${fps}fps.${videoFormat.extension}`}
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-semibold transition-colors"
               >
                 <Download className="w-4 h-4" aria-hidden="true" />
-                <span>ดาวน์โหลดไฟล์ .MP4</span>
+                <span>ดาวน์โหลดไฟล์ .{videoFormat.extension.toUpperCase()}</span>
               </a>
             </div>
           )}
 
-          {/* Error state */}
           {status === 'error' && errorMsg && (
             <p role="alert" className="text-xs text-rose-400 bg-rose-950/30 border border-rose-900/60 rounded-lg p-3">
               {errorMsg}
             </p>
           )}
 
-          {/* Footer Buttons */}
           <div className="flex items-center justify-end gap-3 pt-1 border-t border-slate-800">
             <button
               type="button"
@@ -326,9 +453,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               <button
                 type="button"
                 onClick={handleStartRender}
-                className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition-colors"
+                disabled={!supportedFormat || !captureStreamSupported}
+                className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                เริ่มเรนเดอร์วิดีโอ .MP4
+                เริ่มเรนเดอร์วิดีโอ
               </button>
             )}
           </div>
