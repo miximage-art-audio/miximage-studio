@@ -1,3 +1,7 @@
+import midnightSynth from '../assets/images/artwork_midnight_synth_1794603085399.jpg';
+import vinylEclipse from '../assets/images/artwork_vinyl_eclipse_1794603085426.jpg';
+import tokyoRain from '../assets/images/artwork_tokyo_rain_1794603085551.jpg';
+
 export type AspectRatioKey = '1:1' | '2:3' | '3:2' | '4:5' | '5:4' | '16:9' | '9:16';
 export type WaveformStyle = 'neon_bars' | 'smooth_wave' | 'circular_core';
 export type ColorThemeKey = 'cyberpunk' | 'gold_fire' | 'ice_blue' | 'emerald';
@@ -191,18 +195,18 @@ export const DEMO_ARTWORKS: DemoArtwork[] = [
     id: 'midnight-synth',
     title: 'Analog Synth Studio',
     aspectHint: '16:9',
-    src: '/src/assets/images/artwork_midnight_synth_1794603085399.jpg',
+    src: midnightSynth,
   },
   {
     id: 'vinyl-eclipse',
     title: 'Vinyl Eclipse Cover',
     aspectHint: '1:1',
-    src: '/src/assets/images/artwork_vinyl_eclipse_1794603085426.jpg',
+    src: vinylEclipse,
   },
   {
     id: 'tokyo-rain',
     title: 'Tokyo Rain Reflections',
     aspectHint: '9:16',
-    src: '/src/assets/images/artwork_tokyo_rain_1794603085551.jpg',
+    src: tokyoRain,
   },
 ];
