@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import {
   ASPECT_RATIOS,
@@ -7,7 +7,9 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
+  WaveformLayoutConfig,
   WaveformStyle,
+  clampWaveformLayout,
 } from '../engine/presets';
 
 interface StudioStageProps {
@@ -18,6 +20,7 @@ interface StudioStageProps {
   theme: ColorThemeKey;
   fps: FpsOption;
   bassIntensity: number;
+  waveformLayout: WaveformLayoutConfig;
   isPlaying: boolean;
   isMuted: boolean;
   isAnalyzing: boolean;
@@ -31,6 +34,7 @@ interface StudioStageProps {
   onRestart: () => void;
   onToggleMute: () => void;
   onSeek: (timeSec: number) => void;
+  onChangeWaveformLayout: (next: WaveformLayoutConfig) => void;
 }
 
 function formatTime(sec: number): string {
@@ -48,6 +52,7 @@ export const StudioStage: React.FC<StudioStageProps> = ({
   theme,
   fps,
   bassIntensity,
+  waveformLayout,
   isPlaying,
   isMuted,
   isAnalyzing,
@@ -61,19 +66,115 @@ export const StudioStage: React.FC<StudioStageProps> = ({
   onRestart,
   onToggleMute,
   onSeek,
+  onChangeWaveformLayout,
 }) => {
   const ratioSpec = ASPECT_RATIOS[ratio];
   const themeSpec = COLOR_THEMES[theme];
   const zoomFactor = 1.0 + currentBassVal * 0.1 * bassIntensity;
   const isShakeActive = currentBassVal > 0.45;
 
+  const [isDragging, setIsDragging] = useState(false);
+  const stageBoxRef = useRef<HTMLDivElement | null>(null);
+  const [stageBoxSize, setStageBoxSize] = useState<{ w: number; h: number }>({
+    w: 0,
+    h: 0,
+  });
+
+  useEffect(() => {
+    const el = stageBoxRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setStageBoxSize({
+        w: Math.max(0, Math.floor(rect.width)),
+        h: Math.max(0, Math.floor(rect.height)),
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const dragStartRef = useRef<{
+    clientX: number;
+    clientY: number;
+    startPosX: number;
+    startPosY: number;
+    rectW: number;
+    rectH: number;
+  } | null>(null);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    canvas.setPointerCapture(e.pointerId);
+    setIsDragging(true);
+    dragStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      startPosX: waveformLayout.posX,
+      startPosY: waveformLayout.posY,
+      rectW: rect.width,
+      rectH: rect.height,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragStartRef.current;
+    if (!drag) return;
+    const dx = (e.clientX - drag.clientX) / drag.rectW;
+    const dy = (e.clientY - drag.clientY) / drag.rectH;
+    onChangeWaveformLayout(
+      clampWaveformLayout({
+        ...waveformLayout,
+        posX: drag.startPosX + dx,
+        posY: drag.startPosY + dy,
+      })
+    );
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (dragStartRef.current && canvasRef.current?.hasPointerCapture(e.pointerId)) {
+      canvasRef.current.releasePointerCapture(e.pointerId);
+    }
+    dragStartRef.current = null;
+    setIsDragging(false);
+  };
+
+  // Fit the active aspect ratio exactly inside the measured stage box without overflowing
+  const targetRatio = ratioSpec.width / ratioSpec.height;
+  let fittedBoxStyle: React.CSSProperties = {
+    aspectRatio: `${ratioSpec.width} / ${ratioSpec.height}`,
+    maxHeight: 'min(480px, 50vh)',
+    maxWidth: '100%',
+    width: ratioSpec.width >= ratioSpec.height ? '100%' : 'auto',
+    height: ratioSpec.width < ratioSpec.height ? 'min(480px, 50vh)' : 'auto',
+  };
+
+  if (stageBoxSize.w > 40 && stageBoxSize.h > 40) {
+    let w = stageBoxSize.w;
+    let h = w / targetRatio;
+    if (h > stageBoxSize.h) {
+      h = stageBoxSize.h;
+      w = h * targetRatio;
+    }
+    fittedBoxStyle = {
+      width: `${Math.floor(w)}px`,
+      height: `${Math.floor(h)}px`,
+    };
+  }
+
   return (
     <section
       aria-label="พื้นที่แสดงผลวิดีโอสด"
-      className="flex flex-col gap-4 bg-[#111827] border border-slate-800 rounded-xl p-4 sm:p-5"
+      className="flex flex-col gap-2.5 lg:gap-3 bg-[#111827] border border-slate-800 rounded-xl p-3 sm:p-4 lg:h-full min-h-0"
     >
       {/* Stage Top Metadata Strip (unboxed text with typographic separators) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 border-b border-slate-800/80 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-b border-slate-800/80 pb-2 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-slate-100 font-semibold">{ratioSpec.label}</span>
           <span aria-hidden="true">·</span>
@@ -89,14 +190,18 @@ export const StudioStage: React.FC<StudioStageProps> = ({
         <div className="flex items-center gap-2">
           <span>{themeSpec.label}</span>
           <span aria-hidden="true">·</span>
-          <span className="truncate max-w-[200px]" title={audioName}>
+          <span className="font-mono tabular-nums text-slate-300">
+            ตำแหน่ง {Math.round(waveformLayout.posX * 100)}%, {Math.round(waveformLayout.posY * 100)}%
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="truncate max-w-[160px]" title={audioName}>
             {audioName}
           </span>
         </div>
       </div>
 
       {/* Main Canvas Stage Container */}
-      <div className="relative w-full rounded-lg bg-[#070A12] border border-slate-800/90 flex items-center justify-center p-3 sm:p-5 min-h-[280px] lg:min-h-[500px]">
+      <div className="relative w-full rounded-lg bg-[#070A12] border border-slate-800/90 flex flex-col items-center justify-center p-2.5 sm:p-3 min-h-[250px] lg:min-h-0 lg:flex-1 gap-1.5 overflow-hidden">
         {isAnalyzing && (
           <div className="absolute inset-0 z-10 bg-[#070A12]/85 backdrop-blur-xs flex flex-col items-center justify-center gap-2 rounded-lg">
             <div className="w-7 h-7 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
@@ -107,31 +212,51 @@ export const StudioStage: React.FC<StudioStageProps> = ({
         )}
 
         <div
-          className="relative flex items-center justify-center overflow-hidden rounded-md shadow-2xl border border-slate-800/70 bg-black"
-          style={{
-            aspectRatio: `${ratioSpec.width} / ${ratioSpec.height}`,
-            maxHeight: 'min(520px, 52vh)',
-            maxWidth: '100%',
-            width: ratioSpec.width >= ratioSpec.height ? '100%' : 'auto',
-            height: ratioSpec.width < ratioSpec.height ? 'min(520px, 52vh)' : 'auto',
-          }}
+          ref={stageBoxRef}
+          className="w-full flex-1 min-h-[210px] lg:min-h-0 flex items-center justify-center overflow-hidden"
         >
-          <canvas
-            ref={canvasRef}
-            data-testid="studio-canvas"
-            data-ratio={ratio}
-            data-style={style}
-            data-theme={theme}
-            data-fit={fitMode}
-            data-playing={isPlaying ? 'true' : 'false'}
-            className="w-full h-full block object-contain"
-          />
+          <div
+            className="relative flex items-center justify-center overflow-hidden rounded-md shadow-2xl border border-slate-800/70 bg-black"
+            style={fittedBoxStyle}
+          >
+            <canvas
+              ref={canvasRef}
+              data-testid="studio-canvas"
+              data-ratio={ratio}
+              data-style={style}
+              data-theme={theme}
+              data-fit={fitMode}
+              data-pos-x={waveformLayout.posX.toFixed(2)}
+              data-pos-y={waveformLayout.posY.toFixed(2)}
+              data-scale={waveformLayout.scale.toFixed(2)}
+              data-opacity={waveformLayout.opacity.toFixed(2)}
+              data-playing={isPlaying ? 'true' : 'false'}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              title="ลากบนภาพเพื่อย้ายตำแหน่งคลื่นเสียง"
+              className={`w-full h-full block object-contain touch-none select-none ${
+                isDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+            />
+          </div>
         </div>
+
+        <p className="text-[11px] text-slate-500 shrink-0">
+          ลากเมาส์หรือนิ้วบนภาพพรีวิวเพื่อย้ายตำแหน่งคลื่นเสียงได้ทันที · ขนาด{' '}
+          <span className="font-mono tabular-nums text-slate-400">
+            {waveformLayout.scale.toFixed(2)}x
+          </span>{' '}
+          · โปร่งใส{' '}
+          <span className="font-mono tabular-nums text-slate-400">
+            {Math.round(waveformLayout.opacity * 100)}%
+          </span>
+        </p>
       </div>
 
       {/* Transport & Real-Time DSP Telemetry Strip */}
-      <div className="flex flex-col gap-3 pt-1">
-        {/* Timeline Scrub Bar */}
+      <div className="flex flex-col gap-2 pt-0.5 shrink-0">
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs tabular-nums text-slate-300 w-11 shrink-0">
             {formatTime(currentTime)}
@@ -154,7 +279,6 @@ export const StudioStage: React.FC<StudioStageProps> = ({
           </span>
         </div>
 
-        {/* Play Controls + Live DSP Physics Readout */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <button
@@ -201,7 +325,6 @@ export const StudioStage: React.FC<StudioStageProps> = ({
             </button>
           </div>
 
-          {/* Live Bass-Sync Readout (driven by real analyzed DSP envelope) */}
           <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
             <div className="flex items-center gap-2">
               <span>แรงเบส 20–150Hz:</span>

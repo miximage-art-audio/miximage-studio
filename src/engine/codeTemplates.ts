@@ -3,6 +3,7 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
+  WaveformLayoutConfig,
   WaveformStyle,
 } from './presets';
 
@@ -13,6 +14,7 @@ export interface CloudWorkflowDefaults {
   bass: number;
   fit: FitMode;
   fps: FpsOption;
+  layout?: WaveformLayoutConfig;
 }
 
 export function generateRequirementsTxt(): string {
@@ -52,6 +54,17 @@ COLOR_THEMES = {
     "emerald": ((150, 255, 0), (0, 180, 80)),      # เขียวนีออน ไล่เฉดไป เขียวมรกต
 }
 
+ALL_WAVEFORM_STYLES = [
+    "neon_bars",
+    "smooth_wave",
+    "circular_core",
+    "mirror_horizon",
+    "pulse_rings",
+    "particle_burst",
+    "dual_ribbon",
+    "matrix_blocks",
+]
+
 
 def convert_to_wav(input_audio_path, temp_wav="temp_decoded.wav"):
     """
@@ -75,7 +88,6 @@ def analyze_audio(wav_path, fps, n_bars=64):
     hop_length = int(sr / fps)
     n_fft = 2048
 
-    # คำนวณพลังงานคลื่นเสียงในแต่ละช่วงเวลา
     stft = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
 
@@ -85,7 +97,6 @@ def analyze_audio(wav_path, fps, n_bars=64):
     if np.max(bass_raw) > 0:
         bass_raw = bass_raw / np.max(bass_raw)
 
-    # ปรับความนุ่มนวลแบบ Attack/Release ให้จังหวะกระแทกคมชัดแต่ไม่สั่นมั่ว
     bass_env = np.zeros_like(bass_raw)
     attack, release = 0.65, 0.18
     for i in range(1, len(bass_raw)):
@@ -95,7 +106,7 @@ def analyze_audio(wav_path, fps, n_bars=64):
             bass_env[i] = release * bass_raw[i] + (1 - release) * bass_env[i - 1]
     bass_env = np.power(bass_env, 1.4)
 
-    # 2. สกัดสเปกตรัมความถี่ 64 แท่ง (30Hz - 12,000Hz) สำหรับวาดคลื่นเสียง
+    # 2. สกัดสเปกตรัมความถี่ 64 แท่ง (30Hz - 12,000Hz)
     mel_spec = librosa.feature.melspectrogram(
         S=stft**2, sr=sr, n_mels=n_bars, fmin=30, fmax=12000
     )
@@ -126,7 +137,6 @@ def prepare_base_image(img_path, target_w, target_h, fit_mode="cover"):
     if fit_mode == "cover":
         return cover_crop
 
-    # โหมด blur_pad: สร้างพื้นหลังเบลอฟุ้งและลดความสว่างลง 55% เพื่อขับภาพหลักให้เด่น
     blurred_bg = cv2.GaussianBlur(cover_crop, (0, 0), sigmaX=35, sigmaY=35)
     blurred_bg = (blurred_bg * 0.45).astype(np.uint8)
 
@@ -145,7 +155,6 @@ def apply_bass_transform(base_img, bass_val, intensity_mult):
     h, w = base_img.shape[:2]
     zoom = 1.0 + (bass_val * 0.10 * intensity_mult)
 
-    # สร้างแรงสั่นสะเทือนแกน X/Y เฉพาะช่วงที่เบสกระแทกเกิน 45%
     shake_px = int(bass_val * 14 * intensity_mult) if bass_val > 0.45 else 0
     dx = np.random.randint(-shake_px, shake_px + 1) if shake_px > 0 else 0
     dy = np.random.randint(-shake_px, shake_px + 1) if shake_px > 0 else 0
@@ -153,7 +162,6 @@ def apply_bass_transform(base_img, bass_val, intensity_mult):
     M = cv2.getRotationMatrix2D((w / 2 + dx, h / 2 + dy), 0, zoom)
     frame = cv2.warpAffine(base_img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
-    # เร่งความสว่างของภาพเล็กน้อยในเสี้ยววินาทีที่เบสลงหนัก
     if bass_val > 0.3:
         boost = 1.0 + (bass_val - 0.3) * 0.25 * intensity_mult
         frame = np.clip(frame.astype(np.float32) * boost, 0, 255).astype(np.uint8)
@@ -161,66 +169,133 @@ def apply_bass_transform(base_img, bass_val, intensity_mult):
     return frame
 
 
-def draw_waveform(frame, spec_col, bass_val, style, theme_name):
+def lerp_bgr(c1, c2, ratio):
+    return tuple(int(c1[c] * (1.0 - ratio) + c2[c] * ratio) for c in range(3))
+
+
+def draw_waveform(
+    frame, spec_col, bass_val, style, theme_name,
+    pos_x=0.5, pos_y=0.82, wf_scale=1.0, opacity=1.0, frame_idx=0
+):
     """
-    วาดกราฟิกคลื่นเสียง 3 สไตล์ พร้อมสร้างเอฟเฟกต์แสงฟุ้งเรืองแสง (Neon Bloom)
+    วาดกราฟิกคลื่นเสียง 8 สไตล์ พร้อมย้ายตำแหน่ง ปรับขนาด ปรับความโปร่งใส และเอฟเฟกต์ Neon Bloom
     """
+    if opacity <= 0.001:
+        return frame
+
     h, w = frame.shape[:2]
     overlay = np.zeros_like(frame)
     c1, c2 = COLOR_THEMES.get(theme_name, COLOR_THEMES["cyberpunk"])
     n_bars = len(spec_col)
+    cx, cy = int(w * pos_x), int(h * pos_y)
 
     if style == "neon_bars":
-        # สไตล์ที่ 1: แท่งคลื่นสมมาตรเรืองแสงด้านล่างหน้าจอ
-        bar_area_w = int(w * 0.82)
-        start_x = (w - bar_area_w) // 2
-        base_y = int(h * 0.84)
-        max_bar_h = int(h * 0.16)
+        bar_area_w = int(w * 0.82 * wf_scale)
+        start_x = cx - bar_area_w // 2
+        max_bar_h = int(h * 0.16 * wf_scale)
         step = bar_area_w / n_bars
         bar_w = max(2, int(step * 0.6))
-
         for i, val in enumerate(spec_col):
-            ratio = i / max(1, n_bars - 1)
-            color = tuple(int(c1[c] * (1 - ratio) + c2[c] * ratio) for c in range(3))
+            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
             bh = max(4, int((val ** 1.3) * max_bar_h * (1.0 + bass_val * 0.35)))
             x = int(start_x + i * step)
-            cv2.rectangle(overlay, (x, base_y - bh), (x + bar_w, base_y + int(bh * 0.35)), color, -1, cv2.LINE_AA)
+            cv2.rectangle(overlay, (x, cy - bh), (x + bar_w, cy + int(bh * 0.35)), color, -1, cv2.LINE_AA)
 
     elif style == "smooth_wave":
-        # สไตล์ที่ 2: คลื่นน้ำไหลต่อเนื่องไล่เฉดสีโปร่งแสง
-        base_y = int(h * 0.84)
-        max_amp = int(h * 0.15)
-        xs = np.linspace(int(w * 0.08), int(w * 0.92), n_bars)
+        span_w = int(w * 0.84 * wf_scale)
+        max_amp = int(h * 0.15 * wf_scale)
+        xs = np.linspace(cx - span_w // 2, cx + span_w // 2, n_bars)
         amps = (spec_col ** 1.25) * max_amp * (1.0 + bass_val * 0.3)
-
-        pts_top = np.column_stack((xs, base_y - amps)).astype(np.int32)
-        pts_bot = np.column_stack((xs[::-1], base_y + amps[::-1] * 0.45)).astype(np.int32)
-        poly = np.vstack((pts_top, pts_bot))
-        cv2.fillPoly(overlay, [poly], c2, cv2.LINE_AA)
-        cv2.polylines(overlay, [pts_top], False, c1, 4, cv2.LINE_AA)
+        pts_top = np.column_stack((xs, cy - amps)).astype(np.int32)
+        pts_bot = np.column_stack((xs[::-1], cy + amps[::-1] * 0.45)).astype(np.int32)
+        cv2.fillPoly(overlay, [np.vstack((pts_top, pts_bot))], c2, cv2.LINE_AA)
+        cv2.polylines(overlay, [pts_top], False, c1, max(2, int(4 * wf_scale)), cv2.LINE_AA)
 
     elif style == "circular_core":
-        # สไตล์ที่ 3: วงแหวนพลังงานคลื่นเสียงตรงกลางภาพที่เต้นขยายตามจังหวะเบส
-        cx, cy = w // 2, h // 2
-        base_r = int(min(w, h) * 0.18 * (1.0 + bass_val * 0.22))
-        max_len = int(min(w, h) * 0.16)
+        base_r = int(min(w, h) * 0.18 * wf_scale * (1.0 + bass_val * 0.22))
+        max_len = int(min(w, h) * 0.16 * wf_scale)
         angles = np.linspace(0, 2 * np.pi, n_bars, endpoint=False)
-
         for i, angle in enumerate(angles):
-            ratio = i / max(1, n_bars - 1)
-            color = tuple(int(c1[c] * (1 - ratio) + c2[c] * ratio) for c in range(3))
+            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
             length = max(4, int((spec_col[i] ** 1.3) * max_len))
-            x1 = int(cx + np.cos(angle) * base_r)
-            y1 = int(cy + np.sin(angle) * base_r)
-            x2 = int(cx + np.cos(angle) * (base_r + length))
-            y2 = int(cy + np.sin(angle) * (base_r + length))
-            cv2.line(overlay, (x1, y1), (x2, y2), color, 4, cv2.LINE_AA)
-        cv2.circle(overlay, (cx, cy), base_r, c1, 3, cv2.LINE_AA)
+            x1, y1 = int(cx + np.cos(angle) * base_r), int(cy + np.sin(angle) * base_r)
+            x2, y2 = int(cx + np.cos(angle) * (base_r + length)), int(cy + np.sin(angle) * (base_r + length))
+            cv2.line(overlay, (x1, y1), (x2, y2), color, max(2, int(4 * wf_scale)), cv2.LINE_AA)
+        cv2.circle(overlay, (cx, cy), base_r, c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
 
-    # สร้างแสงเรืองแสงรอบคลื่นเสียงด้วย Gaussian Blur ซ้อน 2 ชั้น
+    elif style == "mirror_horizon":
+        bar_area_w = int(w * 0.84 * wf_scale)
+        start_x = cx - bar_area_w // 2
+        max_half_h = int(h * 0.13 * wf_scale)
+        step = bar_area_w / n_bars
+        bar_w = max(2, int(step * 0.58))
+        cv2.line(overlay, (start_x, cy), (start_x + bar_area_w, cy), c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+        for i, val in enumerate(spec_col):
+            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
+            hh = max(3, int((val ** 1.28) * max_half_h * (1.0 + bass_val * 0.35)))
+            x = int(start_x + i * step)
+            cv2.rectangle(overlay, (x, cy - hh), (x + bar_w, cy + hh), color, -1, cv2.LINE_AA)
+
+    elif style == "pulse_rings":
+        min_dim = min(w, h) * wf_scale
+        slices = [(0, 18, 0.12, 0.045, c1), (18, 42, 0.21, 0.055, lerp_bgr(c1, c2, 0.5)), (42, 64, 0.30, 0.05, c2)]
+        for r_idx, (s, e, br, amp_s, col) in enumerate(slices):
+            pts = []
+            pulse_r = min_dim * br * (1.0 + bass_val * (0.22 - r_idx * 0.04))
+            for p in range(72):
+                ang = (p / 72.0) * 2 * np.pi
+                b_idx = int(s + (p / 72.0) * (e - s)) % n_bars
+                rad = pulse_r + (spec_col[b_idx] ** 1.2) * (min_dim * amp_s)
+                pts.append([int(cx + np.cos(ang) * rad), int(cy + np.sin(ang) * rad)])
+            cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], True, col, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+
+    elif style == "particle_burst":
+        min_dim = min(w, h) * wf_scale
+        inner_r = int(min_dim * 0.11 * (1.0 + bass_val * 0.24))
+        max_dist = min_dim * 0.24
+        cv2.circle(overlay, (cx, cy), inner_r, c1, max(2, int(3 * wf_scale)), cv2.LINE_AA)
+        for i, val in enumerate(spec_col):
+            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
+            ang = (i * 2 * np.pi) / n_bars + frame_idx * 0.012
+            dist = inner_r + (val ** 1.25) * max_dist * (1.0 + bass_val * 0.25)
+            x1, y1 = int(cx + np.cos(ang) * inner_r), int(cy + np.sin(ang) * inner_r)
+            x2, y2 = int(cx + np.cos(ang) * dist), int(cy + np.sin(ang) * dist)
+            cv2.line(overlay, (x1, y1), (x2, y2), color, max(1, int(2 * wf_scale)), cv2.LINE_AA)
+            cv2.circle(overlay, (x2, y2), max(3, int((3.5 + val * 6.5) * wf_scale)), color, -1, cv2.LINE_AA)
+
+    elif style == "dual_ribbon":
+        span_w = int(w * 0.86 * wf_scale)
+        max_amp = int(h * 0.14 * wf_scale)
+        xs = np.linspace(cx - span_w // 2, cx + span_w // 2, n_bars)
+        for sign, col in [(-1.0, c1), (1.0, c2)]:
+            pts = []
+            for i, val in enumerate(spec_col):
+                mod = np.sin(i * 0.35 + frame_idx * 0.15 * sign)
+                y = cy + sign * (val ** 1.15) * max_amp * (0.65 + 0.35 * mod) * (1.0 + bass_val * 0.32)
+                pts.append([int(xs[i]), int(y)])
+            cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], False, col, max(2, int(4 * wf_scale)), cv2.LINE_AA)
+
+    elif style == "matrix_blocks":
+        bar_area_w = int(w * 0.84 * wf_scale)
+        start_x = cx - bar_area_w // 2
+        max_blocks = 14
+        total_h = int(h * 0.22 * wf_scale)
+        step = bar_area_w / n_bars
+        block_w = max(2, int(step * 0.64))
+        cell_step = total_h / max_blocks
+        block_h = max(2, int(cell_step * 0.68))
+        for i, val in enumerate(spec_col):
+            color = lerp_bgr(c1, c2, i / max(1, n_bars - 1))
+            count = max(1, min(max_blocks, int(round((val ** 1.2) * max_blocks * (1.0 + bass_val * 0.25)))))
+            x = int(start_x + i * step)
+            for b in range(count):
+                y = int(cy - b * cell_step - block_h)
+                col = (255, 255, 255) if b == count - 1 else color
+                cv2.rectangle(overlay, (x, y), (x + block_w, y + block_h), col, -1, cv2.LINE_AA)
+
     glow = cv2.GaussianBlur(overlay, (0, 0), sigmaX=15, sigmaY=15)
-    combined = cv2.addWeighted(frame, 1.0, glow, 0.85, 0)
-    combined = cv2.addWeighted(combined, 1.0, overlay, 0.95, 0)
+    combined = cv2.addWeighted(frame, 1.0, glow, 0.85 * opacity, 0)
+    combined = cv2.addWeighted(combined, 1.0, overlay, 0.95 * opacity, 0)
     return combined
 
 
@@ -230,11 +305,15 @@ def main():
     parser.add_argument("--audio", required=True, help="ที่อยู่ไฟล์เสียง")
     parser.add_argument("--output", default="output_bass_sync.mp4", help="ชื่อไฟล์วิดีโอผลลัพธ์")
     parser.add_argument("--ratio", default="16:9", choices=list(ASPECT_RATIOS.keys()), help="อัตราส่วนภาพ")
-    parser.add_argument("--style", default="neon_bars", choices=["neon_bars", "smooth_wave", "circular_core"], help="รูปแบบคลื่นเสียง")
+    parser.add_argument("--style", default="neon_bars", choices=ALL_WAVEFORM_STYLES, help="รูปแบบคลื่นเสียง")
     parser.add_argument("--theme", default="cyberpunk", choices=list(COLOR_THEMES.keys()), help="โทนสีคลื่นเสียง")
     parser.add_argument("--bass", type=float, default=1.0, help="ความแรงการกระตุกตามเบส")
     parser.add_argument("--fit", default="cover", choices=["cover", "blur_pad"], help="โหมดการจัดวางภาพ")
     parser.add_argument("--fps", type=int, default=30, help="จำนวนเฟรมต่อวินาที")
+    parser.add_argument("--pos-x", type=float, default=0.50, help="ตำแหน่งแนวนอนคลื่นเสียง (0.10 - 0.90)")
+    parser.add_argument("--pos-y", type=float, default=0.82, help="ตำแหน่งแนวตั้งคลื่นเสียง (0.10 - 0.90)")
+    parser.add_argument("--scale", type=float, default=1.0, help="ขนาดคลื่นเสียง (0.40 - 2.00)")
+    parser.add_argument("--opacity", type=float, default=1.0, help="ความโปร่งใสคลื่นเสียง (0.00 - 1.00)")
     args = parser.parse_args()
 
     target_w, target_h = ASPECT_RATIOS[args.ratio]
@@ -262,7 +341,11 @@ def main():
         b_val = bass_env[f_idx]
         s_col = mel_spec[:, f_idx]
         frame = apply_bass_transform(base_img, b_val, args.bass)
-        frame = draw_waveform(frame, s_col, b_val, args.style, args.theme)
+        frame = draw_waveform(
+            frame, s_col, b_val, args.style, args.theme,
+            pos_x=args.pos_x, pos_y=args.pos_y,
+            wf_scale=args.scale, opacity=args.opacity, frame_idx=f_idx
+        )
         proc.stdin.write(frame.tobytes())
 
     proc.stdin.close()
@@ -279,9 +362,15 @@ if __name__ == "__main__":
 }
 
 export function generateCloudRenderYaml(defaults: CloudWorkflowDefaults): string {
-  const bassChoice = [0.5, 1.0, 1.5, 2.0].reduce((prev, curr) =>
+  const bassChoices = [0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 1.5, 2.0];
+  const bassChoice = bassChoices.reduce((prev, curr) =>
     Math.abs(curr - defaults.bass) < Math.abs(prev - defaults.bass) ? curr : prev
   ).toFixed(1);
+
+  const posX = (defaults.layout?.posX ?? 0.5).toFixed(2);
+  const posY = (defaults.layout?.posY ?? 0.82).toFixed(2);
+  const scale = (defaults.layout?.scale ?? 1.0).toFixed(2);
+  const opacity = (defaults.layout?.opacity ?? 1.0).toFixed(2);
 
   return `name: ระบบเรนเดอร์วิดีโอซิ้งเบสและคลื่นเสียงบนคลาวด์
 
@@ -302,7 +391,7 @@ on:
           - '16:9'
           - '9:16'
       waveform_style:
-        description: '2. เลือกรูปแบบคลื่นเสียง (neon_bars = แท่งนีออน, smooth_wave = คลื่นน้ำไหล, circular_core = วงแหวนกลางจอ)'
+        description: '2. เลือกรูปแบบคลื่นเสียง (8 สไตล์)'
         required: true
         default: '${defaults.style}'
         type: choice
@@ -310,8 +399,13 @@ on:
           - 'neon_bars'
           - 'smooth_wave'
           - 'circular_core'
+          - 'mirror_horizon'
+          - 'pulse_rings'
+          - 'particle_burst'
+          - 'dual_ribbon'
+          - 'matrix_blocks'
       color_theme:
-        description: '3. เลือกโทนสีคลื่นเสียง (cyberpunk = ฟ้าชมพู, gold_fire = ทองส้ม, ice_blue = ขาวน้ำเงิน, emerald = เขียวมรกต)'
+        description: '3. เลือกโทนสีคลื่นเสียง'
         required: true
         default: '${defaults.theme}'
         type: choice
@@ -321,17 +415,21 @@ on:
           - 'ice_blue'
           - 'emerald'
       bass_intensity:
-        description: '4. เลือกความแรงภาพกระตุกตามเบส (0.5 = เบา, 1.0 = มาตรฐาน, 1.5 = แรง, 2.0 = โหด)'
+        description: '4. เลือกความแรงภาพกระตุกตามเบส (0.0 = ปิด, 0.2 = เบามาก, 0.5 = เบา, 1.0 = มาตรฐาน)'
         required: true
         default: '${bassChoice}'
         type: choice
         options:
+          - '0.0'
+          - '0.1'
+          - '0.2'
+          - '0.3'
           - '0.5'
           - '1.0'
           - '1.5'
           - '2.0'
       fit_mode:
-        description: '5. เลือกการจัดวางรูปภาพ (cover = ขยายเต็มจอ, blur_pad = พื้นหลังเบลอวางภาพเต็มใบ)'
+        description: '5. เลือกการจัดวางรูปภาพ'
         required: true
         default: '${defaults.fit}'
         type: choice
@@ -339,13 +437,33 @@ on:
           - 'cover'
           - 'blur_pad'
       fps:
-        description: '6. เลือกความลื่นไหลของภาพ (30 หรือ 60 เฟรมต่อวินาที)'
+        description: '6. เลือกความลื่นไหลของภาพ (FPS)'
         required: true
         default: '${defaults.fps}'
         type: choice
         options:
           - '30'
           - '60'
+      pos_x:
+        description: '7. ตำแหน่งแนวนอนคลื่นเสียง (0.10 - 0.90)'
+        required: true
+        default: '${posX}'
+        type: string
+      pos_y:
+        description: '8. ตำแหน่งแนวตั้งคลื่นเสียง (0.10 - 0.90)'
+        required: true
+        default: '${posY}'
+        type: string
+      waveform_scale:
+        description: '9. ขนาดคลื่นเสียง (0.40 - 2.00)'
+        required: true
+        default: '${scale}'
+        type: string
+      waveform_opacity:
+        description: '10. ความโปร่งใสคลื่นเสียง (0.00 - 1.00)'
+        required: true
+        default: '${opacity}'
+        type: string
 
 jobs:
   render_video:
@@ -383,7 +501,11 @@ jobs:
             --theme "\${{ inputs.color_theme }}" \\
             --bass "\${{ inputs.bass_intensity }}" \\
             --fit "\${{ inputs.fit_mode }}" \\
-            --fps "\${{ inputs.fps }}"
+            --fps "\${{ inputs.fps }}" \\
+            --pos-x "\${{ inputs.pos_x }}" \\
+            --pos-y "\${{ inputs.pos_y }}" \\
+            --scale "\${{ inputs.waveform_scale }}" \\
+            --opacity "\${{ inputs.waveform_opacity }}"
 
       - name: อัปโหลดไฟล์วิดีโอที่เรนเดอร์เสร็จแล้วให้ดาวน์โหลด
         uses: actions/upload-artifact@v4

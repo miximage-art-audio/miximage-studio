@@ -17,7 +17,9 @@ import {
   DEMO_ARTWORKS,
   FitMode,
   FpsOption,
+  WaveformLayoutConfig,
   WaveformStyle,
+  getDefaultWaveformLayout,
 } from './engine/presets';
 import {
   RenderSurface,
@@ -69,6 +71,10 @@ export default function App() {
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
   const [bassIntensity, setBassIntensity] = useState<number>(1.0);
   const [fps, setFps] = useState<FpsOption>(30);
+  const [waveformLayout, setWaveformLayout] = useState<WaveformLayoutConfig>(() =>
+    getDefaultWaveformLayout('neon_bars')
+  );
+  const hasCustomPosRef = useRef<boolean>(false);
 
   // Audio + DSP Data
   const [audioSamples, setAudioSamples] = useState<Float32Array | null>(null);
@@ -103,8 +109,9 @@ export default function App() {
     bassIntensity,
     fps,
     dspResult,
+    waveformLayout,
   });
-  paramsRef.current = { style, theme, bassIntensity, fps, dspResult };
+  paramsRef.current = { style, theme, bassIntensity, fps, dspResult, waveformLayout };
 
   const customImgUrlRef = useRef<string | null>(null);
 
@@ -199,8 +206,14 @@ export default function App() {
   const drawFrameAtTime = useCallback((timeSec: number) => {
     const canvas = canvasRef.current;
     const surface = surfaceRef.current;
-    const { dspResult: dsp, style: s, theme: t, bassIntensity: bInt, fps: curFps } =
-      paramsRef.current;
+    const {
+      dspResult: dsp,
+      style: s,
+      theme: t,
+      bassIntensity: bInt,
+      fps: curFps,
+      waveformLayout: wfLayout,
+    } = paramsRef.current;
     if (!canvas || !surface || !dsp) return 0;
 
     const ctx = canvas.getContext('2d');
@@ -216,7 +229,7 @@ export default function App() {
       specCol[b] = dsp.melSpec[b][frameIdx] ?? 0;
     }
 
-    renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, frameIdx);
+    renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, frameIdx, wfLayout);
     return bassVal;
   }, []);
 
@@ -234,6 +247,7 @@ export default function App() {
     theme,
     bassIntensity,
     fps,
+    waveformLayout,
     dspResult,
     currentTime,
     drawFrameAtTime,
@@ -465,6 +479,24 @@ export default function App() {
     }
   };
 
+  const handleChangeStyle = (nextStyle: WaveformStyle) => {
+    setStyle(nextStyle);
+    if (!hasCustomPosRef.current) {
+      const def = getDefaultWaveformLayout(nextStyle);
+      setWaveformLayout((prev) => ({ ...prev, posX: def.posX, posY: def.posY }));
+    }
+  };
+
+  const handleChangeWaveformLayout = (next: WaveformLayoutConfig) => {
+    hasCustomPosRef.current = true;
+    setWaveformLayout(next);
+  };
+
+  const handleResetWaveformLayout = () => {
+    hasCustomPosRef.current = false;
+    setWaveformLayout(getDefaultWaveformLayout(style));
+  };
+
   const workflowDefaults = useMemo(
     () => ({
       ratio,
@@ -473,12 +505,13 @@ export default function App() {
       bass: bassIntensity,
       fit: fitMode,
       fps,
+      layout: waveformLayout,
     }),
-    [ratio, style, theme, bassIntensity, fitMode, fps]
+    [ratio, style, theme, bassIntensity, fitMode, fps, waveformLayout]
   );
 
   return (
-    <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#090D16] text-slate-100 flex flex-col">
       <TopBar
         activeTab={activeTab}
         onSelectTab={setActiveTab}
@@ -487,10 +520,16 @@ export default function App() {
         canRender={!isAnalyzing && Boolean(loadedImage) && Boolean(audioSamples)}
       />
 
-      <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-6">
+      <main
+        className={`flex-1 min-h-0 w-full max-w-[1440px] mx-auto px-4 sm:px-6 ${
+          activeTab === 'studio'
+            ? 'py-3 lg:py-3.5 lg:overflow-hidden'
+            : 'py-6 lg:overflow-y-auto'
+        }`}
+      >
         {activeTab === 'studio' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <div className="lg:col-span-7 xl:col-span-8">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_520px] xl:grid-cols-[minmax(0,1fr)_560px] gap-4 lg:h-full min-h-0 items-stretch">
+            <div className="min-h-0 lg:h-full flex flex-col">
               <StudioStage
                 canvasRef={canvasRef}
                 ratio={ratio}
@@ -499,6 +538,7 @@ export default function App() {
                 theme={theme}
                 fps={fps}
                 bassIntensity={bassIntensity}
+                waveformLayout={waveformLayout}
                 isPlaying={isPlaying}
                 isMuted={isMuted}
                 isAnalyzing={isAnalyzing}
@@ -512,10 +552,11 @@ export default function App() {
                 onRestart={handleRestart}
                 onToggleMute={handleToggleMute}
                 onSeek={handleSeek}
+                onChangeWaveformLayout={handleChangeWaveformLayout}
               />
             </div>
 
-            <div className="lg:col-span-5 xl:col-span-4">
+            <div className="min-h-0 lg:h-full flex flex-col">
               <ControlRail
                 selectedArtworkId={selectedArtworkId}
                 customImageName={customImageName}
@@ -527,6 +568,7 @@ export default function App() {
                 theme={theme}
                 bassIntensity={bassIntensity}
                 fps={fps}
+                waveformLayout={waveformLayout}
                 audioError={audioError}
                 onSelectDemoArtwork={handleSelectDemoArtwork}
                 onUploadImage={handleUploadImage}
@@ -534,10 +576,12 @@ export default function App() {
                 onUploadAudio={handleUploadAudio}
                 onChangeRatio={setRatio}
                 onChangeFitMode={setFitMode}
-                onChangeStyle={setStyle}
+                onChangeStyle={handleChangeStyle}
                 onChangeTheme={setTheme}
                 onChangeBassIntensity={setBassIntensity}
                 onChangeFps={setFps}
+                onChangeWaveformLayout={handleChangeWaveformLayout}
+                onResetWaveformLayout={handleResetWaveformLayout}
               />
             </div>
           </div>
@@ -567,6 +611,7 @@ export default function App() {
         theme={theme}
         bassIntensity={bassIntensity}
         fps={fps}
+        waveformLayout={waveformLayout}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ImagePlus, Music2, Upload } from 'lucide-react';
+import { ImagePlus, Music2, RotateCcw, Upload } from 'lucide-react';
 import {
   ASPECT_RATIOS,
   AspectRatioKey,
@@ -13,7 +13,9 @@ import {
   SUPPORTED_AUDIO_EXTENSIONS,
   SUPPORTED_IMAGE_EXTENSIONS,
   WAVEFORM_STYLES,
+  WaveformLayoutConfig,
   WaveformStyle,
+  clampWaveformLayout,
 } from '../engine/presets';
 
 interface ControlRailProps {
@@ -27,6 +29,7 @@ interface ControlRailProps {
   theme: ColorThemeKey;
   bassIntensity: number;
   fps: FpsOption;
+  waveformLayout: WaveformLayoutConfig;
   audioError: string | null;
   onSelectDemoArtwork: (id: string) => void;
   onUploadImage: (file: File) => void;
@@ -38,6 +41,8 @@ interface ControlRailProps {
   onChangeTheme: (theme: ColorThemeKey) => void;
   onChangeBassIntensity: (val: number) => void;
   onChangeFps: (fps: FpsOption) => void;
+  onChangeWaveformLayout: (next: WaveformLayoutConfig) => void;
+  onResetWaveformLayout: () => void;
 }
 
 export const ControlRail: React.FC<ControlRailProps> = ({
@@ -51,6 +56,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   theme,
   bassIntensity,
   fps,
+  waveformLayout,
   audioError,
   onSelectDemoArtwork,
   onUploadImage,
@@ -62,25 +68,31 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   onChangeTheme,
   onChangeBassIntensity,
   onChangeFps,
+  onChangeWaveformLayout,
+  onResetWaveformLayout,
 }) => {
   const imgInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
 
+  const updateLayout = (patch: Partial<WaveformLayoutConfig>) => {
+    onChangeWaveformLayout(clampWaveformLayout({ ...waveformLayout, ...patch }));
+  };
+
   return (
     <aside
       aria-label="แผงควบคุมพารามิเตอร์เรนเดอร์"
-      className="bg-[#111827] border border-slate-800 rounded-xl p-5 flex flex-col gap-6"
+      className="bg-[#111827] border border-slate-800 rounded-xl p-3.5 lg:p-4 flex flex-col gap-2.5 lg:h-full lg:overflow-y-auto lg:justify-between"
     >
       {/* 1. Media Inputs */}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-100">
+          <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
             1. สื่อต้นฉบับ (ภาพและเสียง)
           </h2>
           <button
             type="button"
             onClick={() => imgInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-1"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-0.5"
           >
             <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
             <span>อัปโหลดรูปภาพ</span>
@@ -98,8 +110,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           />
         </div>
 
-        {/* Built-in Artworks + Custom Image indicator */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5">
           {DEMO_ARTWORKS.map((art) => {
             const active = selectedArtworkId === art.id;
             return (
@@ -107,13 +118,13 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 key={art.id}
                 type="button"
                 onClick={() => onSelectDemoArtwork(art.id)}
-                className={`group relative rounded-lg overflow-hidden border text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`group relative rounded-lg overflow-hidden border text-left transition-all flex items-center gap-2 p-1.5 bg-[#0D1320] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 ring-1 ring-sky-400/40'
                     : 'border-slate-800 hover:border-slate-600'
                 }`}
               >
-                <div className="aspect-video w-full bg-slate-900 overflow-hidden">
+                <div className="w-11 h-8 rounded bg-slate-900 overflow-hidden shrink-0">
                   <img
                     src={art.src}
                     alt={art.title}
@@ -121,7 +132,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                   />
                 </div>
-                <div className="px-2 py-1.5 bg-[#0D1320]">
+                <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-medium text-slate-200 truncate">
                     {art.title}
                   </p>
@@ -134,18 +145,11 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        {customImageName && (
-          <p className="text-xs text-sky-300 truncate">
-            ภาพที่อัปโหลด: {customImageName}
-          </p>
-        )}
-
-        {/* Audio File Picker */}
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => audioInputRef.current?.click()}
-            className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 hover:border-slate-500 bg-[#0D1320] hover:bg-slate-800/80 text-xs font-medium text-slate-100 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 bg-[#0D1320] hover:bg-slate-800/80 text-xs font-medium text-slate-100 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
           >
             <Upload className="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true" />
             <span className="truncate">เลือกไฟล์เสียง (.mp3, .wav, .flac...)</span>
@@ -153,7 +157,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           <button
             type="button"
             onClick={onUseDemoAudio}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
               isDemoAudio
                 ? 'border-sky-400/70 bg-sky-500/15 text-sky-200'
                 : 'border-slate-700 hover:border-slate-500 text-slate-300'
@@ -175,9 +179,16 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           />
         </div>
 
-        <p className="text-xs text-slate-400 truncate">
-          เสียงปัจจุบัน: <span className="text-slate-200">{audioName}</span>
-        </p>
+        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+          <p className="truncate">
+            เสียงปัจจุบัน: <span className="text-slate-200">{audioName}</span>
+          </p>
+          {customImageName && (
+            <p className="text-sky-300 truncate shrink-0 max-w-[180px]">
+              ภาพ: {customImageName}
+            </p>
+          )}
+        </div>
 
         {audioError && (
           <p role="alert" className="text-xs text-rose-400">
@@ -189,11 +200,17 @@ export const ControlRail: React.FC<ControlRailProps> = ({
       <hr className="border-slate-800/80" />
 
       {/* 2. Aspect Ratio & Fit Mode */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-slate-100">
-          2. อัตราส่วนภาพ (1080p Full HD) และโหมดจัดวาง
-        </h2>
-        <div className="grid grid-cols-4 gap-1.5">
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs sm:text-sm font-semibold text-slate-100 whitespace-nowrap">
+            2. อัตราส่วนภาพ (1080p) และโหมดจัดวาง
+          </h2>
+          <span className="text-[11px] text-slate-400 truncate hidden sm:inline">
+            {ASPECT_RATIOS[ratio].usage}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1">
           {(Object.keys(ASPECT_RATIOS) as AspectRatioKey[]).map((key) => {
             const active = ratio === key;
             return (
@@ -202,7 +219,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeRatio(key)}
                 aria-pressed={active}
-                className={`px-2 py-2 rounded-lg border text-xs font-mono font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`px-1.5 py-1.5 rounded-lg border text-xs font-mono font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-sky-200'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
@@ -213,11 +230,8 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             );
           })}
         </div>
-        <p className="text-xs text-slate-400">
-          {ASPECT_RATIOS[ratio].usage}
-        </p>
 
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="grid grid-cols-2 gap-1.5">
           {FIT_MODES.map((m) => {
             const active = fitMode === m.key;
             return (
@@ -226,14 +240,14 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeFitMode(m.key)}
                 aria-pressed={active}
-                className={`px-3 py-2 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`px-2.5 py-1.5 rounded-lg border flex items-center justify-between gap-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
-                <div className="text-xs font-semibold whitespace-nowrap">{m.label}</div>
-                <div className="text-[11px] text-slate-400 truncate">{m.key}</div>
+                <span className="text-xs font-semibold truncate">{m.label}</span>
+                <span className="text-[10px] font-mono text-slate-400 shrink-0">{m.key}</span>
               </button>
             );
           })}
@@ -242,12 +256,16 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
       <hr className="border-slate-800/80" />
 
-      {/* 3. Waveform Style & Color Theme */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-slate-100">
-          3. รูปแบบคลื่นเสียงและโทนสี Neon Bloom
-        </h2>
-        <div className="grid grid-cols-1 gap-1.5">
+      {/* 3. Waveform Style (8 styles) & Color Theme */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
+            3. รูปแบบคลื่นเสียง (8 แบบ) และโทนสี
+          </h2>
+          <span className="text-[11px] font-mono text-slate-400">{style}</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
           {WAVEFORM_STYLES.map((item) => {
             const active = style === item.key;
             return (
@@ -256,23 +274,23 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeStyle(item.key)}
                 aria-pressed={active}
-                className={`px-3 py-2 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                title={item.description}
+                className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold whitespace-nowrap">{item.label}</span>
-                  <span className="text-[11px] font-mono text-slate-400">{item.key}</span>
+                <div className="text-[11px] font-semibold truncate">{item.label}</div>
+                <div className="text-[10px] font-mono text-slate-400 truncate">
+                  {item.key}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">{item.description}</p>
               </button>
             );
           })}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
           {(Object.keys(COLOR_THEMES) as ColorThemeKey[]).map((key) => {
             const item = COLOR_THEMES[key];
             const active = theme === key;
@@ -284,21 +302,21 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeTheme(key)}
                 aria-pressed={active}
-                className={`px-3 py-2 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                title={item.description}
+                className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <span
                     aria-hidden="true"
-                    className="w-4 h-2.5 rounded-xs shrink-0"
+                    className="w-3.5 h-2.5 rounded-xs shrink-0"
                     style={{ background: `linear-gradient(90deg, ${c1}, ${c2})` }}
                   />
-                  <span className="text-xs font-semibold whitespace-nowrap">{item.label}</span>
+                  <span className="text-[11px] font-semibold truncate">{item.label}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 truncate mt-0.5">{item.description}</p>
               </button>
             );
           })}
@@ -307,27 +325,182 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
       <hr className="border-slate-800/80" />
 
-      {/* 4. Bass Intensity & FPS */}
-      <div className="flex flex-col gap-3">
+      {/* 4. Waveform Position, Scale & Opacity */}
+      <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-100">
-            4. แรงกระตุกเบส (20–150Hz) และ FPS
+          <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
+            4. ตำแหน่ง ขนาด และความโปร่งใสคลื่นเสียง
           </h2>
-          <span className="text-xs font-mono tabular-nums text-sky-300">
-            {bassIntensity.toFixed(1)}x
+          <button
+            type="button"
+            onClick={onResetWaveformLayout}
+            className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-0.5"
+          >
+            <RotateCcw className="w-3 h-3" aria-hidden="true" />
+            <span>รีเซ็ตค่าเริ่มต้น</span>
+          </button>
+        </div>
+
+        {/* Quick vertical position presets */}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button
+            type="button"
+            onClick={() => updateLayout({ posX: 0.5, posY: 0.2 })}
+            className="px-2 py-1 rounded-md border border-slate-800 bg-[#0D1320] hover:border-slate-600 text-[11px] text-slate-200 whitespace-nowrap transition-colors"
+          >
+            ด้านบน (20%)
+          </button>
+          <button
+            type="button"
+            onClick={() => updateLayout({ posX: 0.5, posY: 0.5 })}
+            className="px-2 py-1 rounded-md border border-slate-800 bg-[#0D1320] hover:border-slate-600 text-[11px] text-slate-200 whitespace-nowrap transition-colors"
+          >
+            กึ่งกลาง (50%)
+          </button>
+          <button
+            type="button"
+            onClick={() => updateLayout({ posX: 0.5, posY: 0.82 })}
+            className="px-2 py-1 rounded-md border border-slate-800 bg-[#0D1320] hover:border-slate-600 text-[11px] text-slate-200 whitespace-nowrap transition-colors"
+          >
+            ด้านล่าง (82%)
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <label htmlFor="wf-pos-x" className="text-slate-300">
+                ตำแหน่ง X
+              </label>
+              <span className="font-mono tabular-nums text-sky-300">
+                {Math.round(waveformLayout.posX * 100)}%
+              </span>
+            </div>
+            <input
+              id="wf-pos-x"
+              type="range"
+              min={0.1}
+              max={0.9}
+              step={0.01}
+              value={waveformLayout.posX}
+              onChange={(e) => updateLayout({ posX: parseFloat(e.target.value) })}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+            />
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <label htmlFor="wf-pos-y" className="text-slate-300">
+                ตำแหน่ง Y
+              </label>
+              <span className="font-mono tabular-nums text-sky-300">
+                {Math.round(waveformLayout.posY * 100)}%
+              </span>
+            </div>
+            <input
+              id="wf-pos-y"
+              type="range"
+              min={0.1}
+              max={0.9}
+              step={0.01}
+              value={waveformLayout.posY}
+              onChange={(e) => updateLayout({ posY: parseFloat(e.target.value) })}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+            />
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <label htmlFor="wf-scale" className="text-slate-300">
+                ขนาดคลื่น
+              </label>
+              <span className="font-mono tabular-nums text-sky-300">
+                {waveformLayout.scale.toFixed(2)}x
+              </span>
+            </div>
+            <input
+              id="wf-scale"
+              type="range"
+              min={0.4}
+              max={2.0}
+              step={0.05}
+              value={waveformLayout.scale}
+              onChange={(e) => updateLayout({ scale: parseFloat(e.target.value) })}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+            />
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <label htmlFor="wf-opacity" className="text-slate-300">
+                ความโปร่งใส
+              </label>
+              <span className="font-mono tabular-nums text-sky-300">
+                {Math.round(waveformLayout.opacity * 100)}%
+              </span>
+            </div>
+            <input
+              id="wf-opacity"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={waveformLayout.opacity}
+              onChange={(e) => updateLayout({ opacity: parseFloat(e.target.value) })}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+            />
+          </div>
+        </div>
+      </div>
+
+      <hr className="border-slate-800/80" />
+
+      {/* 5. Bass Intensity & FPS */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
+            5. แรงกระตุกเบส (20–150Hz) และ FPS
+          </h2>
+          <span
+            data-testid="bass-intensity-value"
+            className="text-xs font-mono tabular-nums text-sky-300"
+          >
+            {bassIntensity.toFixed(2)}x
           </span>
         </div>
 
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="flex flex-col gap-0.5">
+          <label htmlFor="bass-intensity-slider" className="sr-only">
+            ปรับความแรงการกระตุกตามเบสแบบละเอียด
+          </label>
+          <input
+            id="bass-intensity-slider"
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={bassIntensity}
+            onChange={(e) => onChangeBassIntensity(parseFloat(e.target.value))}
+            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+          />
+          <div className="flex justify-between text-[10px] font-mono text-slate-500">
+            <span>0.00x (นิ่ง)</span>
+            <span>0.25x (นุ่มนวล)</span>
+            <span>1.00x</span>
+            <span>2.00x (แรงสุด)</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-1.5">
           {BASS_INTENSITY_PRESETS.map((preset) => {
-            const active = Math.abs(bassIntensity - preset.value) < 0.05;
+            const active = Math.abs(bassIntensity - preset.value) < 0.025;
             return (
               <button
                 key={preset.value}
                 type="button"
                 onClick={() => onChangeBassIntensity(preset.value)}
                 aria-pressed={active}
-                className={`px-2 py-2 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-sky-200'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
@@ -339,7 +512,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="grid grid-cols-2 gap-1.5">
           {([30, 60] as FpsOption[]).map((f) => {
             const active = fps === f;
             return (
@@ -348,7 +521,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeFps(f)}
                 aria-pressed={active}
-                className={`px-3 py-2 rounded-lg border text-xs font-mono font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-sky-200'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'

@@ -26,8 +26,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   canRender,
 }) => {
   return (
-    <header className="border-b border-slate-800/90 bg-[#0B101B]/95 backdrop-blur-sm sticky top-0 z-30">
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
+    <header className="border-b border-slate-800/90 bg-[#0B101B]/95 backdrop-blur-sm sticky top-0 z-30 shrink-0">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-14 md:h-12 flex items-center justify-between gap-8">
         {/* Zone 1: Brand wordmark (single line, no badges/subtext) */}
         <button
           type="button"

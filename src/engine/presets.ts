@@ -3,10 +3,51 @@ import vinylEclipse from '../assets/images/artwork_vinyl_eclipse_1794603085426.j
 import tokyoRain from '../assets/images/artwork_tokyo_rain_1794603085551.jpg';
 
 export type AspectRatioKey = '1:1' | '2:3' | '3:2' | '4:5' | '5:4' | '16:9' | '9:16';
-export type WaveformStyle = 'neon_bars' | 'smooth_wave' | 'circular_core';
+export type WaveformStyle =
+  | 'neon_bars'
+  | 'smooth_wave'
+  | 'circular_core'
+  | 'mirror_horizon'
+  | 'pulse_rings'
+  | 'particle_burst'
+  | 'dual_ribbon'
+  | 'matrix_blocks';
 export type ColorThemeKey = 'cyberpunk' | 'gold_fire' | 'ice_blue' | 'emerald';
 export type FitMode = 'cover' | 'blur_pad';
 export type FpsOption = 30 | 60;
+
+export interface WaveformLayoutConfig {
+  posX: number; // normalized 0.10 .. 0.90 (0.50 = center)
+  posY: number; // normalized 0.10 .. 0.90
+  scale: number; // 0.40 .. 2.00 (1.00 = default)
+  opacity: number; // 0.00 .. 1.00 (1.00 = opaque)
+}
+
+export function isRadialWaveformStyle(style: WaveformStyle): boolean {
+  return (
+    style === 'circular_core' ||
+    style === 'pulse_rings' ||
+    style === 'particle_burst'
+  );
+}
+
+export function getDefaultWaveformLayout(style: WaveformStyle): WaveformLayoutConfig {
+  return {
+    posX: 0.5,
+    posY: isRadialWaveformStyle(style) ? 0.5 : 0.82,
+    scale: 1.0,
+    opacity: 1.0,
+  };
+}
+
+export function clampWaveformLayout(config: WaveformLayoutConfig): WaveformLayoutConfig {
+  return {
+    posX: Math.min(0.9, Math.max(0.1, Number(config.posX.toFixed(3)))),
+    posY: Math.min(0.9, Math.max(0.1, Number(config.posY.toFixed(3)))),
+    scale: Math.min(2.0, Math.max(0.4, Number(config.scale.toFixed(2)))),
+    opacity: Math.min(1.0, Math.max(0.0, Number(config.opacity.toFixed(2)))),
+  };
+}
 
 export interface AspectRatioSpec {
   key: AspectRatioKey;
@@ -135,7 +176,32 @@ export const WAVEFORM_STYLES: Array<{
   {
     key: 'circular_core',
     label: 'วงแหวนพลังงาน 360°',
-    description: 'วงแหวนแผ่รัศมีกลางจอ ขยายหดตามแรงกระแทกเบส',
+    description: 'วงแหวนแผ่รัศมีขยายหดตามแรงกระแทกเบส',
+  },
+  {
+    key: 'mirror_horizon',
+    label: 'เส้นขอบฟ้าสมมาตร',
+    description: 'คลื่นสมมาตรบน-ล่างเท่ากันจากเส้นแกนกลางเรืองแสง',
+  },
+  {
+    key: 'pulse_rings',
+    label: 'คลื่นวงแหวนซ้อน 3 ชั้น',
+    description: 'วงแหวนหลายชั้นสั่นพ้องตามย่านเบส กลาง และแหลม',
+  },
+  {
+    key: 'particle_burst',
+    label: 'ประกายดาวกระจาย',
+    description: 'กลุ่มอนุภาคพลังงานพุ่งกระจาย 360° ตามจังหวะสเปกตรัม',
+  },
+  {
+    key: 'dual_ribbon',
+    label: 'ริบบิ้นคลื่นคู่',
+    description: 'เส้นริบบิ้นคู่สลับเฟสไขว้กันแบบโมเดิร์น',
+  },
+  {
+    key: 'matrix_blocks',
+    label: 'บล็อกดิจิทัล LED',
+    description: 'แถบไฟ LED แบ่งบล็อกสไตล์มิกเซอร์สตูดิโอ',
   },
 ];
 
@@ -157,6 +223,8 @@ export const FIT_MODES: Array<{
 ];
 
 export const BASS_INTENSITY_PRESETS = [
+  { value: 0.0, label: '0.0x ปิด' },
+  { value: 0.2, label: '0.2x เบามาก' },
   { value: 0.5, label: '0.5x เบา' },
   { value: 1.0, label: '1.0x มาตรฐาน' },
   { value: 1.5, label: '1.5x แรง' },

@@ -6,7 +6,14 @@ import {
   encodeWav,
   generateDemoBassTrack,
 } from './dsp';
-import { ASPECT_RATIOS, COLOR_THEMES } from './presets';
+import {
+  ASPECT_RATIOS,
+  BASS_INTENSITY_PRESETS,
+  COLOR_THEMES,
+  WAVEFORM_STYLES,
+  clampWaveformLayout,
+  getDefaultWaveformLayout,
+} from './presets';
 import {
   generateCloudRenderYaml,
   generateRenderEnginePy,
@@ -24,13 +31,52 @@ test('ASPECT_RATIOS defines all 7 required 1080p Full HD ratios', () => {
   assert.equal(ASPECT_RATIOS['4:5'].height, 1350);
 });
 
-test('COLOR_THEMES defines all 4 neon themes', () => {
+test('WAVEFORM_STYLES defines 8 styles, COLOR_THEMES defines 4 themes, and BASS_INTENSITY_PRESETS supports soft values', () => {
+  assert.equal(WAVEFORM_STYLES.length, 8);
+  assert.deepEqual(
+    BASS_INTENSITY_PRESETS.map((p) => p.value),
+    [0.0, 0.2, 0.5, 1.0, 1.5, 2.0]
+  );
+  assert.deepEqual(
+    WAVEFORM_STYLES.map((s) => s.key),
+    [
+      'neon_bars',
+      'smooth_wave',
+      'circular_core',
+      'mirror_horizon',
+      'pulse_rings',
+      'particle_burst',
+      'dual_ribbon',
+      'matrix_blocks',
+    ]
+  );
   assert.deepEqual(Object.keys(COLOR_THEMES), [
     'cyberpunk',
     'gold_fire',
     'ice_blue',
     'emerald',
   ]);
+});
+
+test('WaveformLayoutConfig defaults and clamping enforce valid ranges', () => {
+  const linearDefault = getDefaultWaveformLayout('neon_bars');
+  assert.equal(linearDefault.posX, 0.5);
+  assert.equal(linearDefault.posY, 0.82);
+
+  const radialDefault = getDefaultWaveformLayout('pulse_rings');
+  assert.equal(radialDefault.posX, 0.5);
+  assert.equal(radialDefault.posY, 0.5);
+
+  const clamped = clampWaveformLayout({
+    posX: -0.5,
+    posY: 1.5,
+    scale: 4.0,
+    opacity: -0.2,
+  });
+  assert.equal(clamped.posX, 0.1);
+  assert.equal(clamped.posY, 0.9);
+  assert.equal(clamped.scale, 2.0);
+  assert.equal(clamped.opacity, 0.0);
 });
 
 test('Bass-Sync bandpass (20Hz-150Hz) reacts strongly to 60Hz sub-bass and ignores 4kHz tone', () => {
@@ -91,26 +137,35 @@ test('computeFitGeometry scales 16:9 image into 9:16 cover and blur_pad contain 
   assert.ok(geom.contain.y > 0);
 });
 
-test('Code templates inject studio defaults cleanly into cloud_render.yml', () => {
+test('Code templates inject studio defaults and soft bass intensity cleanly into cloud_render.yml', () => {
   const reqs = generateRequirementsTxt();
   const py = generateRenderEnginePy();
   const yml = generateCloudRenderYaml({
     ratio: '9:16',
-    style: 'circular_core',
+    style: 'pulse_rings',
     theme: 'gold_fire',
-    bass: 1.5,
+    bass: 0.2,
     fit: 'blur_pad',
     fps: 60,
+    layout: { posX: 0.35, posY: 0.42, scale: 1.35, opacity: 0.75 },
   });
 
   assert.match(reqs, /librosa>=0\.10\.1/);
   assert.match(py, /def apply_bass_transform/);
+  assert.match(py, /mirror_horizon/);
+  assert.match(py, /matrix_blocks/);
+  assert.match(py, /--pos-x/);
+  assert.match(py, /--opacity/);
   assert.match(yml, /default: '9:16'/);
-  assert.match(yml, /default: 'circular_core'/);
+  assert.match(yml, /default: 'pulse_rings'/);
   assert.match(yml, /default: 'gold_fire'/);
-  assert.match(yml, /default: '1\.5'/);
+  assert.match(yml, /default: '0\.2'/);
   assert.match(yml, /default: 'blur_pad'/);
   assert.match(yml, /default: '60'/);
+  assert.match(yml, /default: '0\.35'/);
+  assert.match(yml, /default: '0\.42'/);
+  assert.match(yml, /default: '1\.35'/);
+  assert.match(yml, /default: '0\.75'/);
   assert.match(yml, /\.opus/);
   assert.match(yml, /\.aiff/);
 });
