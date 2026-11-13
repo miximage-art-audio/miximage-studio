@@ -71,7 +71,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 text-sm font-semibold whitespace-nowrap shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
           >
             <Film className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <span>{isRendering ? 'กำลังเรนเดอร์...' : 'เรนเดอร์ .MP4'}</span>
+            <span>{isRendering ? 'กำลังเรนเดอร์...' : 'เรนเดอร์ .MP4 / วิดีโอ'}</span>
           </button>
         </div>
       </div>

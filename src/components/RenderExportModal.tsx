@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Download, Film, X } from 'lucide-react';
 import { DspAnalysisResult, analyzeAudioSamples } from '../engine/dsp';
+import { getCueValidationError, LyricCue, SubtitleStyle } from '../engine/lyrics';
+import { drawLyricsOverlay } from '../engine/renderLyrics';
 import {
   ASPECT_RATIOS,
   AspectRatioKey,
@@ -32,6 +34,8 @@ interface RenderExportModalProps {
   bassIntensity: number;
   fps: FpsOption;
   waveformLayout: WaveformLayoutConfig;
+  lyricCues: LyricCue[];
+  subtitleStyle: SubtitleStyle;
 }
 
 type RenderStatus = 'idle' | 'rendering' | 'done' | 'error';
@@ -63,6 +67,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   bassIntensity,
   fps,
   waveformLayout,
+  lyricCues,
+  subtitleStyle,
 }) => {
   const [resolutionScale, setResolutionScale] = useState<'1080p' | '720p'>('1080p');
   const [status, setStatus] = useState<RenderStatus>('idle');
@@ -100,6 +106,15 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const handleStartRender = async () => {
     if (!imageEl || !audioSamples) {
       setErrorMsg('กรุณาเลือกรูปภาพและไฟล์เสียงก่อนเริ่มเรนเดอร์');
+      setStatus('error');
+      return;
+    }
+
+    const lyricError = subtitleStyle.enabled && lyricCues.length
+      ? getCueValidationError(lyricCues, audioSamples.length / audioSampleRate)
+      : null;
+    if (lyricError) {
+      setErrorMsg(`กรุณาตรวจเวลาซับไตเติลก่อนเรนเดอร์: ${lyricError}`);
       setStatus('error');
       return;
     }
@@ -176,6 +191,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           clampedFrame,
           waveformLayout
         );
+        drawLyricsOverlay(renderCtx, outW, outH, clampedFrame / fps, lyricCues, subtitleStyle);
       };
       drawFrame(0);
 
@@ -280,7 +296,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         recorder.start(1000);
       });
 
-      const actualFormat = videoFormat ?? resolveRecordingFormat(recorder.mimeType, supportedFormat) ?? supportedFormat;
+      const actualFormat = resolveRecordingFormat(recorder.mimeType, supportedFormat) ?? supportedFormat;
       const url = URL.createObjectURL(recordedBlob);
       setVideoUrl(url);
       setVideoFormat(actualFormat);
@@ -367,7 +383,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             <span>คลื่น: {style}</span>
             <span>สี: {theme}</span>
             <span>เบส: {bassIntensity.toFixed(1)}x</span>
+            <span>ซับไตเติล: {subtitleStyle.enabled ? `${lyricCues.length} บรรทัด` : 'ปิด'}</span>
           </div>
+
+          <p className="text-xs leading-relaxed text-slate-400">ไฟล์ภาพ เสียง และซับไตเติลประมวลผลในเบราว์เซอร์ทั้งหมด กรุณาเปิดแท็บนี้ไว้ระหว่างบันทึก ซึ่งใช้เวลาใกล้เคียงความยาวเพลง</p>
 
           {status === 'idle' && (
             <div className="flex flex-col gap-2">

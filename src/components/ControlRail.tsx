@@ -43,6 +43,7 @@ interface ControlRailProps {
   onChangeFps: (fps: FpsOption) => void;
   onChangeWaveformLayout: (next: WaveformLayoutConfig) => void;
   onResetWaveformLayout: () => void;
+  children?: React.ReactNode;
 }
 
 export const ControlRail: React.FC<ControlRailProps> = ({
@@ -70,6 +71,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   onChangeFps,
   onChangeWaveformLayout,
   onResetWaveformLayout,
+  children,
 }) => {
   const imgInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -100,6 +102,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           <input
             ref={imgInputRef}
             type="file"
+            aria-label="อัปโหลดไฟล์รูปภาพ"
             accept={SUPPORTED_IMAGE_EXTENSIONS.join(',')}
             className="hidden"
             onChange={(e) => {
@@ -169,6 +172,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           <input
             ref={audioInputRef}
             type="file"
+            aria-label="อัปโหลดไฟล์เสียง"
             accept={SUPPORTED_AUDIO_EXTENSIONS.join(',')}
             className="hidden"
             onChange={(e) => {
@@ -189,6 +193,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             </p>
           )}
         </div>
+        <p className="text-[11px] text-slate-400">ถอดรหัสเสียงในเบราว์เซอร์โดยตรง รูปแบบที่ใช้ได้ขึ้นกับเบราว์เซอร์ แนะนำ MP3 หรือ WAV PCM</p>
 
         {audioError && (
           <p role="alert" className="text-xs text-rose-400">
@@ -196,6 +201,9 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           </p>
         )}
       </div>
+
+      <hr className="border-slate-800/80" />
+      {children}
 
       <hr className="border-slate-800/80" />
 
