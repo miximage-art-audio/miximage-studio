@@ -4,6 +4,9 @@ import { CloudPipelineView } from './components/CloudPipelineView';
 import { ControlRail } from './components/ControlRail';
 import { RenderExportModal } from './components/RenderExportModal';
 import { StudioStage } from './components/StudioStage';
+import { LyricsPanel } from './components/LyricsPanel';
+import { autoSyncLyrics, DEFAULT_SUBTITLE_STYLE, LyricCue, SubtitleStyle } from './engine/lyrics';
+import { drawLyricsOverlay } from './engine/renderLyrics';
 import { TopBar, WorkspaceTab } from './components/TopBar';
 import {
   DspAnalysisResult,
@@ -88,6 +91,10 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState<number>(0.48);
   const [currentBassVal, setCurrentBassVal] = useState<number>(0);
 
+  const [lyricCues, setLyricCues] = useState<LyricCue[]>([]);
+  const [lyricsText, setLyricsText] = useState('');
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+
   // Refs for smooth animation & Web Audio playback
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const surfaceRef = useRef<RenderSurface | null>(null);
@@ -110,8 +117,10 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
+    lyricCues,
+    subtitleStyle,
   });
-  paramsRef.current = { style, theme, bassIntensity, fps, dspResult, waveformLayout };
+  paramsRef.current = { style, theme, bassIntensity, fps, dspResult, waveformLayout, lyricCues, subtitleStyle };
 
   const customImgUrlRef = useRef<string | null>(null);
 
@@ -202,6 +211,12 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [audioSamples, audioSampleRate, fps]);
 
+  useEffect(() => {
+    if (audioSamples) {
+      setLyricCues(cues => cues.length ? autoSyncLyrics(cues.map(cue => cue.text), audioSamples, audioSampleRate) : cues);
+    }
+  }, [audioSamples, audioSampleRate]);
+
   // 6. Render a single frame for a given playback time
   const drawFrameAtTime = useCallback((timeSec: number) => {
     const canvas = canvasRef.current;
@@ -240,6 +255,7 @@ export default function App() {
     }
 
     renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, exactFrame, wfLayout);
+    drawLyricsOverlay(ctx, surface.width, surface.height, timeSec, paramsRef.current.lyricCues, paramsRef.current.subtitleStyle);
     return bassVal;
   }, []);
 
@@ -259,6 +275,8 @@ export default function App() {
     fps,
     waveformLayout,
     dspResult,
+    lyricCues,
+    subtitleStyle,
     currentTime,
     drawFrameAtTime,
   ]);
@@ -408,6 +426,14 @@ export default function App() {
     [startPlaybackAt]
   );
 
+  const getPlaybackTime = useCallback(() => {
+    const state = playStateRef.current;
+    const elapsed = state.isPlaying && audioCtxRef.current
+      ? audioCtxRef.current.currentTime - state.startedAtCtxTime
+      : 0;
+    return Math.min(state.durationSec, Math.max(0, state.offsetSec + elapsed));
+  }, []);
+
   const handleToggleMute = useCallback(() => {
     const next = !isMuted;
     setIsMuted(next);
@@ -439,6 +465,9 @@ export default function App() {
   const handleUploadAudio = async (file: File) => {
     stopAudioSource();
     setAudioBufferForRender(null);
+    audioBufferRef.current = null;
+    setAudioSamples(null);
+    setDspResult(null);
     setIsPlaying(false);
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0;
@@ -456,25 +485,9 @@ export default function App() {
         gainNodeRef.current.connect(decodeCtx.destination);
       }
 
-      let decodedBuffer: AudioBuffer | null = null;
-      try {
-        const rawBytes = await file.arrayBuffer();
-        decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
-      } catch {
-        // Fallback to server FFmpeg Universal Audio Pipeline for .wma, .aiff, .opus, 24-bit .flac, etc.
-        const form = new FormData();
-        form.append('audio', file);
-        const res = await fetch('/api/decode-audio', {
-          method: 'POST',
-          body: form,
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || 'ไม่สามารถถอดรหัสไฟล์เสียงนี้ได้');
-        }
-        const wavBytes = await res.arrayBuffer();
-        decodedBuffer = await decodeCtx.decodeAudioData(wavBytes);
-      }
+      const rawBytes = await file.arrayBuffer();
+      const decodedBuffer = await decodeCtx.decodeAudioData(rawBytes);
+      if (!decodedBuffer.length || decodedBuffer.duration <= 0) throw new Error('ไฟล์เสียงไม่มีข้อมูล');
 
       const mono = mixAudioBufferToMono(decodedBuffer);
       audioBufferRef.current = decodedBuffer;
@@ -484,7 +497,7 @@ export default function App() {
       setAudioName(file.name);
       setIsDemoAudio(false);
     } catch (err) {
-      setAudioError(err instanceof Error ? err.message : 'โหลดไฟล์เสียงไม่สำเร็จ');
+      setAudioError(`เบราว์เซอร์อ่านไฟล์เสียงนี้ไม่ได้ กรุณาใช้ MP3 หรือ WAV PCM ที่รองรับ โดยไม่มีการส่งไฟล์ไปยังเซิร์ฟเวอร์${err instanceof Error && err.message ? ` — ${err.message}` : ''}`);
       setIsAnalyzing(false);
     }
   };
@@ -592,7 +605,25 @@ export default function App() {
                 onChangeFps={setFps}
                 onChangeWaveformLayout={handleChangeWaveformLayout}
                 onResetWaveformLayout={handleResetWaveformLayout}
-              />
+              >
+                <LyricsPanel
+                  audioSamples={audioSamples}
+                  sampleRate={audioSampleRate}
+                  duration={audioSamples ? audioSamples.length / audioSampleRate : 0}
+                  currentTime={currentTime}
+                  isPlaying={isPlaying}
+                  keyboardEnabled={!isRenderModalOpen}
+                  cues={lyricCues}
+                  text={lyricsText}
+                  onChangeText={setLyricsText}
+                  onChangeCues={setLyricCues}
+                  subtitleStyle={subtitleStyle}
+                  onChangeStyle={setSubtitleStyle}
+                  getPlaybackTime={getPlaybackTime}
+                  onStartPlayback={() => { void startPlaybackAt(0); }}
+                  onSeek={handleSeek}
+                />
+              </ControlRail>
             </div>
           </div>
         )}
@@ -622,6 +653,8 @@ export default function App() {
         bassIntensity={bassIntensity}
         fps={fps}
         waveformLayout={waveformLayout}
+        lyricCues={lyricCues}
+        subtitleStyle={subtitleStyle}
       />
     </div>
   );
