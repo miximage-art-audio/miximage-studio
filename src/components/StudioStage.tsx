@@ -28,6 +28,7 @@ interface StudioStageProps {
   currentTime: number;
   duration: number;
   currentBassVal: number;
+  currentOnsetFlux?: number;
   totalFrames: number;
   peakBassFrames: number;
   onTogglePlay: () => void;
@@ -60,6 +61,7 @@ export const StudioStage: React.FC<StudioStageProps> = ({
   currentTime,
   duration,
   currentBassVal,
+  currentOnsetFlux = 0,
   totalFrames,
   peakBassFrames,
   onTogglePlay,
@@ -70,8 +72,8 @@ export const StudioStage: React.FC<StudioStageProps> = ({
 }) => {
   const ratioSpec = ASPECT_RATIOS[ratio];
   const themeSpec = COLOR_THEMES[theme];
-  const zoomFactor = 1.0 + currentBassVal * 0.1 * bassIntensity;
-  const isShakeActive = currentBassVal > 0.45;
+  const zoomFactor = 1.0 + currentOnsetFlux * 0.12 * bassIntensity;
+  const isShakeActive = currentOnsetFlux > 0.18;
 
   const [isDragging, setIsDragging] = useState(false);
   const stageBoxRef = useRef<HTMLDivElement | null>(null);
