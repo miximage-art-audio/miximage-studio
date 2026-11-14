@@ -80,39 +80,99 @@ function createAudioBufferFromSamples(
   return buf;
 }
 
-async function ensureAacCompatibleAudioBuffer(
+interface ResolvedAudioConfig {
+  buffer: AudioBuffer;
+  config: AudioEncoderConfig;
+  muxerAudioCodec: 'aac' | 'opus';
+  label: string;
+}
+
+async function resampleAudioBuffer(
+  buffer: AudioBuffer,
+  channels: number,
+  sampleRate: number
+): Promise<AudioBuffer> {
+  if (buffer.numberOfChannels === channels && buffer.sampleRate === sampleRate) {
+    return buffer;
+  }
+  if (typeof OfflineAudioContext !== 'undefined') {
+    const targetLength = Math.max(1, Math.ceil(buffer.duration * sampleRate));
+    const offline = new OfflineAudioContext(channels, targetLength, sampleRate);
+    const src = offline.createBufferSource();
+    src.buffer = buffer;
+    src.connect(offline.destination);
+    src.start(0);
+    return await offline.startRendering();
+  }
+  return buffer;
+}
+
+async function resolveAudioEncoderAndBuffer(
   buffer: AudioBuffer
-): Promise<{ buffer: AudioBuffer; config: AudioEncoderConfig }> {
-  const candidates = [buffer.sampleRate, 48000, 44100];
-  for (const sr of candidates) {
-    const config: AudioEncoderConfig = {
-      codec: 'mp4a.40.2',
-      numberOfChannels: buffer.numberOfChannels,
-      sampleRate: sr,
-      bitrate: 320_000,
-    };
-    const support = await AudioEncoder.isConfigSupported(config);
-    if (support.supported) {
-      if (sr === buffer.sampleRate) {
-        return { buffer, config };
-      }
-      if (typeof OfflineAudioContext !== 'undefined') {
-        const targetLength = Math.max(1, Math.ceil(buffer.duration * sr));
-        const offline = new OfflineAudioContext(
-          buffer.numberOfChannels,
-          targetLength,
-          sr
-        );
-        const src = offline.createBufferSource();
-        src.buffer = buffer;
-        src.connect(offline.destination);
-        src.start(0);
-        const resampled = await offline.startRendering();
-        return { buffer: resampled, config };
+): Promise<ResolvedAudioConfig> {
+  // Windows Media Foundation and standard WebCodecs support 1 (mono) or 2 (stereo) channels
+  const targetChannels = Math.min(2, Math.max(1, buffer.numberOfChannels));
+  const sampleRates = [buffer.sampleRate, 48000, 44100];
+  // Windows Media Foundation AAC strictly supports 96k, 128k, 160k, 192k for stereo; macOS/iOS/Android support up to 320k
+  const aacBitrates =
+    targetChannels === 1
+      ? [128_000, 96_000, 64_000, 160_000, 192_000]
+      : [192_000, 160_000, 128_000, 256_000, 320_000, 96_000];
+
+  // 1. Try AAC across candidate sample rates and standard supported bitrates
+  for (const sr of sampleRates) {
+    for (const bitrate of aacBitrates) {
+      const config: AudioEncoderConfig = {
+        codec: 'mp4a.40.2',
+        numberOfChannels: targetChannels,
+        sampleRate: sr,
+        bitrate,
+      };
+      try {
+        const support = await AudioEncoder.isConfigSupported(config);
+        if (support.supported) {
+          const finalBuffer = await resampleAudioBuffer(buffer, targetChannels, sr);
+          return {
+            buffer: finalBuffer,
+            config,
+            muxerAudioCodec: 'aac',
+            label: `AAC ${Math.round(bitrate / 1000)} kbps`,
+          };
+        }
+      } catch {
+        // try next combination
       }
     }
   }
-  throw new Error('เบราว์เซอร์นี้ไม่รองรับการเข้ารหัสเสียง AAC (mp4a.40.2)');
+
+  // 2. High-compatibility fallback: Opus (native in WebCodecs, supported in MP4 by mp4-muxer)
+  const opusBitrates = [192_000, 160_000, 128_000, 96_000];
+  for (const sr of [48000, buffer.sampleRate]) {
+    for (const bitrate of opusBitrates) {
+      const config: AudioEncoderConfig = {
+        codec: 'opus',
+        numberOfChannels: targetChannels,
+        sampleRate: sr,
+        bitrate,
+      };
+      try {
+        const support = await AudioEncoder.isConfigSupported(config);
+        if (support.supported) {
+          const finalBuffer = await resampleAudioBuffer(buffer, targetChannels, sr);
+          return {
+            buffer: finalBuffer,
+            config,
+            muxerAudioCodec: 'opus',
+            label: `Opus ${Math.round(bitrate / 1000)} kbps`,
+          };
+        }
+      } catch {
+        // try next
+      }
+    }
+  }
+
+  throw new Error('เบราว์เซอร์นี้ไม่รองรับการเข้ารหัสเสียงทั้ง AAC และ Opus ใน WebCodecs');
 }
 
 async function resolveH264EncoderConfig(
@@ -242,11 +302,13 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         throw new Error('ไฟล์เสียงไม่มีความยาวที่ใช้เรนเดอร์ได้');
       }
 
-      const [{ buffer: finalAudioBuffer, config: audioConfig }, videoConfig] =
-        await Promise.all([
-          ensureAacCompatibleAudioBuffer(rawAudioBuffer),
-          resolveH264EncoderConfig(outW, outH, fps),
-        ]);
+      const [
+        { buffer: finalAudioBuffer, config: audioConfig, muxerAudioCodec, label: audioLabel },
+        videoConfig,
+      ] = await Promise.all([
+        resolveAudioEncoderAndBuffer(rawAudioBuffer),
+        resolveH264EncoderConfig(outW, outH, fps),
+      ]);
 
       const dsp: DspAnalysisResult =
         cachedDsp && cachedDsp.fps === fps
@@ -265,7 +327,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           frameRate: fps,
         },
         audio: {
-          codec: 'aac',
+          codec: muxerAudioCodec,
           numberOfChannels: finalAudioBuffer.numberOfChannels,
           sampleRate: finalAudioBuffer.sampleRate,
         },
@@ -291,7 +353,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       audioEncoder.configure(audioConfig);
 
       // 1. Encode full audio track cleanly via WebCodecs AudioEncoder
-      setStatusText('กำลังเข้ารหัสเสียง AAC (320 kbps)...');
+      setStatusText(`กำลังเข้ารหัสเสียง ${audioLabel}...`);
       const numChannels = finalAudioBuffer.numberOfChannels;
       const sr = finalAudioBuffer.sampleRate;
       const totalSamples = finalAudioBuffer.length;
@@ -353,24 +415,24 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         const { bassVal, onsetFlux } = sampleDspAtTime(dsp, t, specCol);
 
         renderStudioFrame(
-          renderCtx,
-          surface,
-          specCol,
-          bassVal,
-          style,
-          theme,
-          bassIntensity,
-          frameIdx,
-          waveformLayout,
-          onsetFlux
+            renderCtx,
+            surface,
+            specCol,
+            bassVal,
+            style,
+            theme,
+            bassIntensity,
+            frameIdx,
+            waveformLayout,
+            onsetFlux
         );
         drawLyricsOverlay(
-          renderCtx,
-          outW,
-          outH,
-          t,
-          lyricCues,
-          subtitleStyle
+            renderCtx,
+            outW,
+            outH,
+            t,
+            lyricCues,
+            subtitleStyle
         );
 
         const videoFrame = new VideoFrame(renderCanvas, {
@@ -484,7 +546,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           >
             {!webCodecsReady
               ? 'เบราว์เซอร์นี้ไม่รองรับ WebCodecs API (VideoEncoder / AudioEncoder) กรุณาเปิดด้วย Chrome, Edge หรือ Safari รุ่นใหม่'
-              : `เรนเดอร์ออฟไลน์ทีละเฟรมด้วย WebCodecs (H.264 8 Mbps + AAC 320 kbps) ความละเอียดเต็ม 1080p (${outW}×${outH} px) และความยาวตรงกับเพลง 100%`}
+              : `เรนเดอร์ออฟไลน์ทีละเฟรมด้วย WebCodecs (H.264 8 Mbps + สเตอริโอความละเอียดสูง) ความละเอียดเต็ม 1080p (${outW}×${outH} px) และความยาวตรงกับเพลง 100%`}
           </div>
 
           <div className="bg-[#090D16] border border-slate-800 rounded-lg p-3.5 text-xs text-slate-300 flex flex-wrap gap-x-4 gap-y-1.5 font-mono tabular-nums">
