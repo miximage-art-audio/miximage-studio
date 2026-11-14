@@ -14,6 +14,9 @@ import {
   WAVEFORM_STYLES,
   clampWaveformLayout,
   getDefaultWaveformLayout,
+  getThemeColorMix,
+  hexToRgb,
+  rgbToHex,
 } from './presets';
 import {
   generateCloudRenderYaml,
@@ -72,6 +75,12 @@ test('WAVEFORM_STYLES defines 15 non-circular 3D/wave styles, COLOR_THEMES defin
     'ice_blue',
     'emerald',
   ]);
+  const mix = getThemeColorMix('cyberpunk');
+  assert.equal(mix.c1, '#00F0FF');
+  assert.equal(mix.c2, '#8A2BE2');
+  assert.equal(mix.c3, '#FF00A0');
+  assert.deepEqual(hexToRgb('#FF8000'), [255, 128, 0]);
+  assert.equal(rgbToHex([255, 128, 0]), '#FF8000');
 });
 
 test('WaveformLayoutConfig defaults and clamping enforce valid ranges', () => {
