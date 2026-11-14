@@ -5,6 +5,7 @@ import {
   computeFitGeometry,
   encodeWav,
   generateDemoBassTrack,
+  sampleDspAtTime,
 } from './dsp';
 import {
   ASPECT_RATIOS,
@@ -23,12 +24,20 @@ import {
 test('ASPECT_RATIOS defines all 7 required 1080p Full HD ratios', () => {
   const keys = Object.keys(ASPECT_RATIOS);
   assert.deepEqual(keys, ['1:1', '2:3', '3:2', '4:5', '5:4', '16:9', '9:16']);
+  assert.equal(ASPECT_RATIOS['1:1'].width, 1080);
+  assert.equal(ASPECT_RATIOS['1:1'].height, 1080);
   assert.equal(ASPECT_RATIOS['16:9'].width, 1920);
   assert.equal(ASPECT_RATIOS['16:9'].height, 1080);
   assert.equal(ASPECT_RATIOS['9:16'].width, 1080);
   assert.equal(ASPECT_RATIOS['9:16'].height, 1920);
   assert.equal(ASPECT_RATIOS['4:5'].width, 1080);
   assert.equal(ASPECT_RATIOS['4:5'].height, 1350);
+  assert.equal(ASPECT_RATIOS['5:4'].width, 1350);
+  assert.equal(ASPECT_RATIOS['5:4'].height, 1080);
+  assert.equal(ASPECT_RATIOS['2:3'].width, 1080);
+  assert.equal(ASPECT_RATIOS['2:3'].height, 1620);
+  assert.equal(ASPECT_RATIOS['3:2'].width, 1620);
+  assert.equal(ASPECT_RATIOS['3:2'].height, 1080);
 });
 
 test('WAVEFORM_STYLES defines 15 non-circular 3D/wave styles, COLOR_THEMES defines 4 themes, and BASS_INTENSITY_PRESETS supports soft values', () => {
@@ -120,6 +129,41 @@ test('64-band Mel spectrogram values remain clamped in [0, 1]', () => {
     }
   }
   assert.ok(analysis.peakBassFrames > 0, 'Demo track should produce bass peaks > 0.45');
+  assert.equal(analysis.bassOnsetFlux.length, analysis.totalFrames);
+  const maxFlux = Math.max(...Array.from(analysis.bassOnsetFlux));
+  assert.ok(maxFlux > 0.15, `Demo kick hits should trigger Onset Flux > 0.15, got ${maxFlux}`);
+  for (let f = 0; f < analysis.totalFrames; f++) {
+    assert.ok(
+      analysis.bassOnsetFlux[f] >= 0 && analysis.bassOnsetFlux[f] <= 1,
+      `Onset flux out of range [0, 1]: ${analysis.bassOnsetFlux[f]}`
+    );
+  }
+
+  const specOut = new Float32Array(64);
+  const sampled = sampleDspAtTime(analysis, 0.5, specOut);
+  assert.ok(sampled.bassVal >= 0 && sampled.bassVal <= 1);
+  assert.ok(sampled.onsetFlux >= 0 && sampled.onsetFlux <= 1);
+});
+
+test('Onset Flux stays near zero on sustained steady 60Hz bass and spikes on kick onset', () => {
+  const sr = 44100;
+  const duration = 2;
+  const n = sr * duration;
+  const samples = new Float32Array(n);
+  // First 1s: steady continuous 60Hz bass; 1.2s..1.4s: silence; 1.4s..2.0s: sudden 60Hz hit
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    if (t < 1.0 || t >= 1.4) {
+      samples[i] = Math.sin(2 * Math.PI * 60 * t);
+    }
+  }
+  const res = analyzeAudioSamples(samples, sr, 30, 64);
+  // Sustained middle of first second (frames 15..25) should have minimal flux
+  const sustainedMax = Math.max(...Array.from(res.bassOnsetFlux.slice(15, 25)));
+  // Sudden onset around t=1.4s (frames 41..46) should spike
+  const onsetMax = Math.max(...Array.from(res.bassOnsetFlux.slice(41, 47)));
+  assert.ok(sustainedMax < 0.05, `Sustained bass should not trigger shake flux, got ${sustainedMax}`);
+  assert.ok(onsetMax > 0.25, `Kick onset should trigger zoom punch flux > 0.25, got ${onsetMax}`);
 });
 
 test('encodeWav creates valid RIFF/WAVE header', () => {
