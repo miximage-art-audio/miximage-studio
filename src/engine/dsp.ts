@@ -1,5 +1,6 @@
 export interface DspAnalysisResult {
   bassEnv: Float32Array;
+  bassOnsetFlux: Float32Array;
   melSpec: Float32Array[]; // length = nBars (64), each Float32Array length = totalFrames
   totalFrames: number;
   fps: number;
@@ -130,7 +131,7 @@ function buildMelFilterbank(
 }
 
 /**
- * 1D Gaussian smoothing along the time axis (matches scipy.ndimage.gaussian_filter1d(sigma=0.9)).
+ * 1D Gaussian smoothing along the time axis (matches scipy.ndimage.gaussian_filter1d).
  */
 function gaussianFilter1dRow(data: Float32Array, sigma: number): Float32Array {
   const n = data.length;
@@ -165,8 +166,9 @@ function gaussianFilter1dRow(data: Float32Array, sigma: number): Float32Array {
 
 /**
  * Analyzes mono PCM audio samples into:
- * 1) Bass-Sync Physics Envelope (20Hz - 150Hz, Fast Attack 65%, Smooth Release 18%, power 1.4)
- * 2) 64-band Mel Spectrogram (30Hz - 12,000Hz, normalized 0..1, smoothed with sigma=0.9)
+ * 1) Bass-Sync Physics Envelope (20Hz - 150Hz, Fast Attack 0.80, Quick Release 0.28, power 1.35)
+ * 2) Onset Flux (current frame bass energy minus moving average of previous 8 frames, clamped >= 0)
+ * 3) 64-band Mel Spectrogram (30Hz - 12,000Hz, normalized 0..1, smoothed with sigma=0.65)
  */
 export function analyzeAudioSamples(
   samples: Float32Array,
@@ -175,8 +177,8 @@ export function analyzeAudioSamples(
   nBars = 64
 ): DspAnalysisResult {
   const nFft = 2048;
-  const hopLength = Math.max(1, Math.floor(sampleRate / fps));
-  const totalFrames = Math.max(1, Math.floor(samples.length / hopLength) + 1);
+  const durationSec = samples.length / sampleRate;
+  const totalFrames = Math.max(1, Math.ceil(durationSec * fps));
   const nBins = nFft / 2 + 1;
 
   // Precompute Hann window
@@ -207,7 +209,7 @@ export function analyzeAudioSamples(
   let maxMelPower = 1e-10;
 
   for (let f = 0; f < totalFrames; f++) {
-    const center = f * hopLength;
+    const center = Math.round((f / fps) * sampleRate);
     const start = center - nFft / 2;
 
     for (let i = 0; i < nFft; i++) {
@@ -246,7 +248,7 @@ export function analyzeAudioSamples(
     }
   }
 
-  // Normalize bass_raw & apply smoother Attack/Release Envelope (42% / 12%)
+  // Normalize bass_raw & apply crisp Attack/Release Envelope (0.80 / 0.28)
   if (maxBassRaw > 0) {
     for (let f = 0; f < totalFrames; f++) {
       bassRaw[f] /= maxBassRaw;
@@ -254,8 +256,8 @@ export function analyzeAudioSamples(
   }
 
   const bassEnvRaw = new Float32Array(totalFrames);
-  const attack = 0.42;
-  const release = 0.12;
+  const attack = 0.80;
+  const release = 0.28;
   bassEnvRaw[0] = Math.pow(bassRaw[0] * attack, 1.35);
 
   let envPrev = bassRaw[0] * attack;
@@ -267,14 +269,27 @@ export function analyzeAudioSamples(
     }
     bassEnvRaw[f] = Math.pow(Math.max(0, envPrev), 1.35);
   }
-  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.75);
+  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.55);
+
+  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0
+  const bassOnsetFlux = new Float32Array(totalFrames);
+  for (let f = 0; f < totalFrames; f++) {
+    const winStart = Math.max(0, f - 8);
+    const count = f - winStart;
+    let sum = 0;
+    for (let k = winStart; k < f; k++) {
+      sum += bassEnv[k];
+    }
+    const prevAvg = count > 0 ? sum / count : 0;
+    bassOnsetFlux[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
+  }
 
   let peakBassFrames = 0;
   for (let f = 0; f < totalFrames; f++) {
     if (bassEnv[f] > 0.45) peakBassFrames++;
   }
 
-  // Convert Mel power to dB relative to maxMelPower, normalize [-80, 0] -> [0, 1], smooth sigma=1.45
+  // Convert Mel power to dB relative to maxMelPower, normalize [-80, 0] -> [0, 1], smooth sigma=0.65
   const tempMel: Float32Array[] = [];
   for (let m = 0; m < nBars; m++) {
     const normRow = new Float32Array(totalFrames);
@@ -284,7 +299,7 @@ export function analyzeAudioSamples(
       const norm = Math.min(1.0, Math.max(0.0, (db + 80.0) / 80.0));
       normRow[f] = norm;
     }
-    tempMel.push(gaussianFilter1dRow(normRow, 1.45));
+    tempMel.push(gaussianFilter1dRow(normRow, 0.65));
   }
 
   // Gentle 3-tap spatial smoothing across adjacent Mel bands for fluid wave shapes
@@ -296,19 +311,54 @@ export function analyzeAudioSamples(
     for (let f = 0; f < totalFrames; f++) {
       melSpec[m][f] = Math.min(
         1.0,
-        Math.max(0.0, prevRow[f] * 0.18 + currRow[f] * 0.64 + nextRow[f] * 0.18)
+        Math.max(0.0, prevRow[f] * 0.14 + currRow[f] * 0.72 + nextRow[f] * 0.14)
       );
     }
   }
 
   return {
     bassEnv,
+    bassOnsetFlux,
     melSpec,
     totalFrames,
     fps,
-    durationSec: samples.length / sampleRate,
+    durationSec,
     peakBassFrames,
   };
+}
+
+/**
+ * Samples interpolated DSP values (bassEnv, bassOnsetFlux, and 64-band melSpec) at exact time `timeSec`.
+ */
+export function sampleDspAtTime(
+  dsp: DspAnalysisResult,
+  timeSec: number,
+  specOut: Float32Array
+): { bassVal: number; onsetFlux: number; exactFrame: number } {
+  const exactFrame = Math.min(
+    dsp.totalFrames - 1,
+    Math.max(0, timeSec * dsp.fps)
+  );
+  const f0 = Math.floor(exactFrame);
+  const f1 = Math.min(dsp.totalFrames - 1, f0 + 1);
+  const frac = exactFrame - f0;
+  const smoothFrac = frac * frac * (3 - 2 * frac);
+
+  const bassVal =
+    (dsp.bassEnv[f0] ?? 0) * (1 - smoothFrac) +
+    (dsp.bassEnv[f1] ?? 0) * smoothFrac;
+  const onsetFlux =
+    (dsp.bassOnsetFlux[f0] ?? 0) * (1 - smoothFrac) +
+    (dsp.bassOnsetFlux[f1] ?? 0) * smoothFrac;
+
+  const bands = Math.min(specOut.length, dsp.melSpec.length);
+  for (let band = 0; band < bands; band++) {
+    const v0 = dsp.melSpec[band][f0] ?? 0;
+    const v1 = dsp.melSpec[band][f1] ?? 0;
+    specOut[band] = v0 * (1 - smoothFrac) + v1 * smoothFrac;
+  }
+
+  return { bassVal, onsetFlux, exactFrame };
 }
 
 /**
