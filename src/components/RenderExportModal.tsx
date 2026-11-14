@@ -18,6 +18,7 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
+  WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
 } from '../engine/presets';
@@ -35,6 +36,7 @@ interface RenderExportModalProps {
   fitMode: FitMode;
   style: WaveformStyle;
   theme: ColorThemeKey;
+  colorMix: WaveformColorMix;
   bassIntensity: number;
   fps: FpsOption;
   waveformLayout: WaveformLayoutConfig;
@@ -218,6 +220,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   fitMode,
   style,
   theme,
+  colorMix,
   bassIntensity,
   fps,
   waveformLayout,
@@ -415,24 +418,25 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         const { bassVal, onsetFlux } = sampleDspAtTime(dsp, t, specCol);
 
         renderStudioFrame(
-            renderCtx,
-            surface,
-            specCol,
-            bassVal,
-            style,
-            theme,
-            bassIntensity,
-            frameIdx,
-            waveformLayout,
-            onsetFlux
+          renderCtx,
+          surface,
+          specCol,
+          bassVal,
+          style,
+          theme,
+          bassIntensity,
+          frameIdx,
+          waveformLayout,
+          onsetFlux,
+          colorMix
         );
         drawLyricsOverlay(
-            renderCtx,
-            outW,
-            outH,
-            t,
-            lyricCues,
-            subtitleStyle
+          renderCtx,
+          outW,
+          outH,
+          t,
+          lyricCues,
+          subtitleStyle
         );
 
         const videoFrame = new VideoFrame(renderCanvas, {
