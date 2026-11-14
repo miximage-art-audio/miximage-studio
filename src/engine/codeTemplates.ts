@@ -522,23 +522,23 @@ jobs:
 
       - name: ค้นหาไฟล์ภาพและไฟล์เสียงอัตโนมัติพร้อมสั่งเรนเดอร์วิดีโอ
         run: |
-          IMAGE_FILE=$(find input/ -type f \\( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.bmp" \\) | head -n 1)
-          AUDIO_FILE=$(find input/ -type f \\( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" -o -iname "*.wma" -o -iname "*.aiff" \\) | head -n 1)
+          IMAGE_FILE=$(find input/ -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.bmp" \) | head -n 1)
+          AUDIO_FILE=$(find input/ -type f \( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" -o -iname "*.wma" -o -iname "*.aiff" \) | head -n 1)
           echo "ไฟล์ภาพที่ตรวจพบ: $IMAGE_FILE"
           echo "ไฟล์เสียงที่ตรวจพบ: $AUDIO_FILE"
-          python render_engine.py \\
-            --image "$IMAGE_FILE" \\
-            --audio "$AUDIO_FILE" \\
-            --output "miximage_render.mp4" \\
-            --ratio "\${{ inputs.aspect_ratio }}" \\
-            --style "\${{ inputs.waveform_style }}" \\
-            --theme "\${{ inputs.color_theme }}" \\
-            --bass "\${{ inputs.bass_intensity }}" \\
-            --fit "\${{ inputs.fit_mode }}" \\
-            --fps "\${{ inputs.fps }}" \\
-            --pos-x "\${{ inputs.pos_x }}" \\
-            --pos-y "\${{ inputs.pos_y }}" \\
-            --scale "\${{ inputs.waveform_scale }}" \\
+          python render_engine.py \
+            --image "$IMAGE_FILE" \
+            --audio "$AUDIO_FILE" \
+            --output "miximage_render.mp4" \
+            --ratio "\${{ inputs.aspect_ratio }}" \
+            --style "\${{ inputs.waveform_style }}" \
+            --theme "\${{ inputs.color_theme }}" \
+            --bass "\${{ inputs.bass_intensity }}" \
+            --fit "\${{ inputs.fit_mode }}" \
+            --fps "\${{ inputs.fps }}" \
+            --pos-x "\${{ inputs.pos_x }}" \
+            --pos-y "\${{ inputs.pos_y }}" \
+            --scale "\${{ inputs.waveform_scale }}" \
             --opacity "\${{ inputs.waveform_opacity }}"
 
       - name: อัปโหลดไฟล์วิดีโอที่เรนเดอร์เสร็จแล้วให้ดาวน์โหลด
