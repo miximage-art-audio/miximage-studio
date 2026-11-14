@@ -20,9 +20,11 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
+  WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
   getDefaultWaveformLayout,
+  getThemeColorMix,
 } from './engine/presets';
 import { DEMO_ARTWORKS } from './engine/demoArtworks';
 import {
@@ -71,6 +73,9 @@ export default function App() {
   const [fitMode, setFitMode] = useState<FitMode>('cover');
   const [style, setStyle] = useState<WaveformStyle>('bars_3d');
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
+  const [colorMix, setColorMix] = useState<WaveformColorMix>(() =>
+    getThemeColorMix('cyberpunk')
+  );
   const [bassIntensity, setBassIntensity] = useState<number>(1.0);
   const [fps, setFps] = useState<FpsOption>(30);
   const [waveformLayout, setWaveformLayout] = useState<WaveformLayoutConfig>(() =>
@@ -113,6 +118,7 @@ export default function App() {
   const paramsRef = useRef({
     style,
     theme,
+    colorMix,
     bassIntensity,
     fps,
     dspResult,
@@ -123,6 +129,7 @@ export default function App() {
   paramsRef.current = {
     style,
     theme,
+    colorMix,
     bassIntensity,
     fps,
     dspResult,
@@ -242,6 +249,7 @@ export default function App() {
       dspResult: dsp,
       style: s,
       theme: t,
+      colorMix: cMix,
       bassIntensity: bInt,
       waveformLayout: wfLayout,
     } = paramsRef.current;
@@ -263,7 +271,8 @@ export default function App() {
       bInt,
       exactFrame,
       wfLayout,
-      onsetFlux
+      onsetFlux,
+      cMix
     );
     drawLyricsOverlay(
       ctx,
@@ -289,6 +298,7 @@ export default function App() {
     fitMode,
     style,
     theme,
+    colorMix,
     bassIntensity,
     fps,
     waveformLayout,
@@ -554,6 +564,11 @@ export default function App() {
     }
   };
 
+  const handleChangeTheme = (nextTheme: ColorThemeKey) => {
+    setTheme(nextTheme);
+    setColorMix(getThemeColorMix(nextTheme));
+  };
+
   const handleChangeWaveformLayout = (next: WaveformLayoutConfig) => {
     hasCustomPosRef.current = true;
     setWaveformLayout(next);
@@ -634,6 +649,7 @@ export default function App() {
                 fitMode={fitMode}
                 style={style}
                 theme={theme}
+                colorMix={colorMix}
                 bassIntensity={bassIntensity}
                 fps={fps}
                 waveformLayout={waveformLayout}
@@ -645,7 +661,8 @@ export default function App() {
                 onChangeRatio={setRatio}
                 onChangeFitMode={setFitMode}
                 onChangeStyle={handleChangeStyle}
-                onChangeTheme={setTheme}
+                onChangeTheme={handleChangeTheme}
+                onChangeColorMix={setColorMix}
                 onChangeBassIntensity={setBassIntensity}
                 onChangeFps={setFps}
                 onChangeWaveformLayout={handleChangeWaveformLayout}
@@ -697,6 +714,7 @@ export default function App() {
         fitMode={fitMode}
         style={style}
         theme={theme}
+        colorMix={colorMix}
         bassIntensity={bassIntensity}
         fps={fps}
         waveformLayout={waveformLayout}
