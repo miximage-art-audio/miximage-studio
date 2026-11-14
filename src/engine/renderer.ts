@@ -135,26 +135,32 @@ function sampleSpec(specCol: Float32Array | number[], u: number): number {
 }
 
 /**
- * Center-focused musical spectrum sampler:
- * Maps the center of the waveform (u = 0.5) to the bass & vocal fundamental bands
- * and radiates outward toward the wings, blended with linear spectrum for organic stereo motion.
+ * True Pitch & Beat Spectrum Sampler:
+ * Samples the 64-band musical Mel spectrogram directly (without artificial timers or bass overrides).
+ * When `symmetric = true`, maps low-to-mid fundamental beats/vocals at the center (u = 0.5)
+ * and mid-to-high harmonics toward the left/right wings with subtle stereo offset.
  */
 function sampleMusicalSpec(
   specCol: Float32Array | number[],
   u: number,
-  bassVal: number
+  symmetric = false
 ): number {
-  const distFromCenter = Math.abs(u - 0.5) * 2; // 0 at center, 1 at left/right edges
-  const symBandU = Math.pow(distFromCenter, 0.88) * 0.82;
-  const symVal = sampleSpec(specCol, symBandU);
-  const linVal = sampleSpec(specCol, u * 0.85);
-  const centerBassBoost = bassVal * 0.24 * Math.pow(Math.max(0, 1 - distFromCenter), 1.4);
-  return Math.min(1, symVal * 0.72 + linVal * 0.28 + centerBassBoost);
+  const clampedU = Math.max(0, Math.min(1, u));
+  if (!symmetric) {
+    // Full-range musical pitch mapping (30Hz -> 10kHz active musical range)
+    const bandPos = Math.pow(clampedU, 0.92) * 0.92;
+    return sampleSpec(specCol, bandPos);
+  }
+  // Center-outward pitch mapping for symmetrical styles
+  const distFromCenter = Math.abs(clampedU - 0.5) * 2; // 0 at center, 1 at wings
+  const stereoOffset = clampedU < 0.5 ? 0.0 : 0.035;
+  const symBandPos = Math.min(0.94, Math.pow(distFromCenter, 0.9) * 0.88 + stereoOffset);
+  return sampleSpec(specCol, symBandPos);
 }
 
 function drawSmoothCurve(
   ctx: CanvasRenderingContext2D,
-  pts: ReadonlyArray< readonly [number, number] | [number, number, ...number[]] >
+  pts: ReadonlyArray<readonly [number, number] | [number, number, ...number[]]>
 ): void {
   if (pts.length === 0) return;
   ctx.moveTo(pts[0][0], pts[0][1]);
@@ -169,14 +175,15 @@ function drawSmoothCurve(
 }
 
 function taperEnvelope(u: number): number {
-  // Smooth bell taper at far left & right edges so waves look clean like studio graphics
+  // Gentle edge taper so outer bars still respond clearly while framing the ends cleanly
   const s = Math.sin(Math.max(0, Math.min(1, u)) * Math.PI);
-  return s * s * 0.76 + 0.24;
+  return Math.pow(s, 0.55) * 0.58 + 0.42;
 }
 
 /**
- * Renders a single frame onto `targetCtx` with smooth Bass-Sync Physics + 64-band Neon Bloom Waveform (15 styles)
- * with customizable position, scale, and opacity.
+ * Renders a single frame onto `targetCtx`:
+ * 1) Background Artwork = Bass-Sync Physics (20Hz-150Hz Sub-bass & Kick Onset Zoom/Shake/Flash)
+ * 2) Foreground Waveform = True 64-band Musical Pitch/Beat Sync (zero fake oscillation, silky liquid motion)
  */
 export function renderStudioFrame(
   targetCtx: CanvasRenderingContext2D,
@@ -200,18 +207,18 @@ export function renderStudioFrame(
   const c2 = customColors ? hexToRgb(customColors.c3, theme.c2Rgb) : theme.c2Rgb;
   const wfLayout = layout ?? getDefaultWaveformLayout(style);
 
-  // 1. Bass-Sync Physics Engine (Smooth Cinematic Breathing Zoom + Gentle Kick Sway + Soft Flash)
-  const punchVal = onsetFlux !== undefined ? onsetFlux * 0.65 + bassVal * 0.35 : bassVal;
-  const zoom = 1.0 + punchVal * 0.085 * intensityMult;
+  // 1. Background Screen Bass-Sync Physics Engine (Onset Flux Zoom Punch + Kick Micro-Shake + Luminance Flash)
+  const punchVal = onsetFlux !== undefined ? onsetFlux : bassVal;
+  const zoom = 1.0 + punchVal * 0.12 * intensityMult;
   const scaleFactor = Math.min(w, h) / 1080;
-  const shakePx = punchVal > 0.2 ? (punchVal - 0.2) * 7.5 * intensityMult * scaleFactor : 0;
+  const shakePx = punchVal > 0.18 ? punchVal * 12 * intensityMult * scaleFactor : 0;
 
   let dx = 0;
   let dy = 0;
-  if (shakePx > 0.05) {
-    // Slow, cushioned organic camera float triggered on bass hits
-    dx = Math.sin(framePhase * 0.28) * shakePx * 0.75 + Math.cos(framePhase * 0.46) * shakePx * 0.25;
-    dy = Math.cos(framePhase * 0.32) * shakePx * 0.75 + Math.sin(framePhase * 0.42) * shakePx * 0.25;
+  if (shakePx > 0.1) {
+    // Crisp dual-frequency screen shake triggered specifically on bass kick hits
+    dx = Math.sin(framePhase * 1.45) * shakePx * 0.75 + Math.cos(framePhase * 2.3) * shakePx * 0.25;
+    dy = Math.cos(framePhase * 1.65) * shakePx * 0.75 + Math.sin(framePhase * 2.1) * shakePx * 0.25;
   }
 
   targetCtx.save();
@@ -224,8 +231,8 @@ export function renderStudioFrame(
 
   targetCtx.drawImage(baseCanvas, 0, 0, w, h);
 
-  if (punchVal > 0.16 && intensityMult > 0) {
-    const k = Math.min(0.38, (punchVal - 0.16) * 0.26 * intensityMult);
+  if (punchVal > 0.15 && intensityMult > 0) {
+    const k = Math.min(0.45, (punchVal - 0.15) * 0.30 * intensityMult);
     targetCtx.globalCompositeOperation = 'lighter';
     targetCtx.globalAlpha = k;
     targetCtx.drawImage(baseCanvas, 0, 0, w, h);
@@ -236,7 +243,7 @@ export function renderStudioFrame(
     return;
   }
 
-  // 2. Draw 15 Non-Circular 3D/Wave Styles onto transparent overlayCanvas
+  // 2. Draw 15 Waveform Styles synced 100% to the Song's True Pitch & Beat Spectrum (specCol)
   const oCtx = overlayCanvas.getContext('2d')!;
   oCtx.clearRect(0, 0, w, h);
   const anchorX = w * wfLayout.posX;
@@ -258,33 +265,33 @@ export function renderStudioFrame(
   oCtx.scale(wfLayout.scale, wfLayout.scale);
 
   if (style === 'bars_3d') {
-    // 1. 3D Isometric Extruded Equalizer Bars
+    // 1. 3D Isometric Extruded Equalizer Bars (True linear pitch spectrum Low -> Mid -> High)
     const count = 36;
     const step = spanW / count;
     const barW = Math.max(4, step * 0.54);
     const depthX = Math.max(2.5, barW * 0.36);
     const depthY = Math.max(2.0, barW * 0.26);
-    const maxBarH = h * 0.175;
+    const maxBarH = h * 0.18;
     const baseLineY = maxBarH * 0.15;
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, false);
       const col = sampleColor3(c1, cMid, c2, u);
       const sideCol = lerpColor(col, [8, 12, 24], 0.45);
       const topCol = lerpColor(col, [255, 255, 255], 0.62);
 
       const bh = Math.max(
         4 * scaleFactor,
-        (0.04 + Math.pow(val, 1.18) * 0.96) * maxBarH * taperEnvelope(u) * (1.0 + bassVal * 0.32)
+        Math.pow(val, 1.08) * maxBarH * taperEnvelope(u)
       );
       const x = xStart + i * step + (step - barW) * 0.3;
       const yTop = baseLineY - bh;
 
       // Soft bottom reflection
-      const reflH = bh * 0.38;
+      const reflH = bh * 0.36;
       const reflGrad = oCtx.createLinearGradient(0, baseLineY, 0, baseLineY + reflH);
-      reflGrad.addColorStop(0, rgbStr(col, 0.38));
+      reflGrad.addColorStop(0, rgbStr(col, 0.36));
       reflGrad.addColorStop(1, rgbStr(col, 0));
       oCtx.fillStyle = reflGrad;
       oCtx.fillRect(x, baseLineY + 2 * scaleFactor, barW, reflH);
@@ -317,7 +324,7 @@ export function renderStudioFrame(
       oCtx.fillRect(x, yTop, barW, bh);
     }
   } else if (style === 'layered_fluid') {
-    // 2. Symmetrical Rounded Pill Capsules (Image 1: Wide-spaced vertical rounded pill bars with 3-lobe diamond silhouette & soft glowing tips)
+    // 2. Symmetrical Rounded Pill Capsules (Image 1: True center-outward spectrum sync without rigid 3-lobe lock)
     const count = 31;
     const step = spanW / count;
     const barW = Math.max(5 * scaleFactor, step * 0.44);
@@ -327,23 +334,19 @@ export function renderStudioFrame(
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
-      const centerLobe = Math.exp(-Math.pow((u - 0.5) / 0.155, 2));
-      const leftLobe = 0.66 * Math.exp(-Math.pow((u - 0.22) / 0.105, 2));
-      const rightLobe = 0.66 * Math.exp(-Math.pow((u - 0.78) / 0.105, 2));
-      const contour = 0.14 + 0.86 * Math.min(1, centerLobe + leftLobe + rightLobe);
+      const val = sampleMusicalSpec(specCol, u, true);
       const halfH = Math.max(
-        barW * 0.45,
-        (0.05 + Math.pow(val, 1.15) * 0.95) * contour * maxHalfH * (1 + bassVal * 0.34)
+        barW * 0.42,
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + (i + 0.5) * step;
       const col = sampleColor3(c1, cMid, c2, u);
-      const coreCol = lerpColor(col, [255, 255, 255], 0.25);
+      const coreCol = lerpColor(col, [255, 255, 255], 0.24);
 
       const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
-      vGrad.addColorStop(0, rgbStr(col, 0.78));
+      vGrad.addColorStop(0, rgbStr(col, 0.82));
       vGrad.addColorStop(0.5, rgbStr(coreCol, 0.98));
-      vGrad.addColorStop(1, rgbStr(col, 0.78));
+      vGrad.addColorStop(1, rgbStr(col, 0.82));
 
       oCtx.strokeStyle = vGrad;
       oCtx.beginPath();
@@ -355,16 +358,16 @@ export function renderStudioFrame(
     // 3. Symmetrical Halftone Dot Columns
     const cols = 54;
     const stepX = spanW / cols;
-    const maxHalfH = h * 0.15;
+    const maxHalfH = h * 0.155;
     const dotStepY = Math.max(4.5, 6.5 * scaleFactor);
 
     for (let i = 0; i < cols; i++) {
       const u = i / (cols - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, true);
       const col = sampleColor3(c1, cMid, c2, u);
       const halfH = Math.max(
-        dotStepY * 0.6,
-        (0.04 + Math.pow(val, 1.18) * 0.96) * maxHalfH * taperEnvelope(u) * (1 + bassVal * 0.32)
+        dotStepY * 0.5,
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + (i + 0.5) * stepX;
       const exactDots = halfH / dotStepY;
@@ -392,15 +395,12 @@ export function renderStudioFrame(
 
     for (let i = 0; i < cols; i++) {
       const u = i / (cols - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, true);
       const col = sampleColor3(c1, cMid, c2, u);
       const hiCol = lerpColor(col, [255, 255, 255], 0.42);
       const exactCells = Math.max(
-        0.6,
-        Math.min(
-          maxHalfCells,
-          (0.05 + Math.pow(val, 1.15) * 0.95) * maxHalfCells * taperEnvelope(u) * (1 + bassVal * 0.3)
-        )
+        0.5,
+        Math.min(maxHalfCells, Math.pow(val, 1.08) * maxHalfCells * taperEnvelope(u))
       );
       const count = Math.max(1, Math.ceil(exactCells));
       const x = xStart + i * stepX + (stepX - cellW) / 2;
@@ -408,7 +408,7 @@ export function renderStudioFrame(
       for (let b = 0; b < count; b++) {
         const offset = b * (cellH + gapY);
         const isTip = b === count - 1;
-        const tipAlpha = isTip ? Math.max(0.2, exactCells - Math.floor(exactCells) || 1) : 1;
+        const tipAlpha = isTip ? Math.max(0.18, exactCells - Math.floor(exactCells) || 1) : 1;
         oCtx.fillStyle = isTip ? rgbStr(hiCol, 0.92 * tipAlpha) : rgbStr(col, 0.88);
         oCtx.fillRect(x, -offset - cellH / 2, cellW, cellH);
         if (b > 0) {
@@ -417,27 +417,22 @@ export function renderStudioFrame(
       }
     }
   } else if (style === 'mesh_ribbon') {
-    // 5. 3D Twisted Dotted Mesh Ribbon (slow, silky multi-strand flowing particle net)
+    // 5. 3D Twisted Dotted Mesh Ribbon (Pure audio-synced amplitude without fake fast phase spin)
     const strands = 10;
     const pts = 84;
-    const maxAmp = h * 0.145;
+    const maxAmp = h * 0.15;
 
     for (let s = 0; s < strands; s++) {
       const sFrac = s / (strands - 1);
-      const strandPhase = (sFrac - 0.5) * 2.0;
+      const strandPhase = (sFrac - 0.5) * Math.PI * 0.95;
       for (let i = 0; i < pts; i++) {
         const u = i / (pts - 1);
         const x = xStart + u * spanW;
-        const val = sampleMusicalSpec(specCol, u, bassVal);
+        const val = sampleMusicalSpec(specCol, u, false);
         const col = sampleColor3(c1, cMid, c2, u);
-        const twist = Math.sin(u * Math.PI * 3.2 + framePhase * 0.024 + strandPhase);
-        const y =
-          twist *
-          (0.06 + Math.pow(val, 1.05) * 0.94) *
-          maxAmp *
-          taperEnvelope(u) *
-          (1 + bassVal * 0.28);
-        const dotR = Math.max(1.3, (2.0 + val * 1.4) * scaleFactor);
+        const twist = Math.sin(u * Math.PI * 3.0 + strandPhase);
+        const y = twist * Math.pow(val, 1.05) * maxAmp * taperEnvelope(u);
+        const dotR = Math.max(1.3, (1.9 + val * 1.5) * scaleFactor);
         oCtx.fillStyle = rgbStr(col, 0.65 + 0.32 * (1 - Math.abs(sFrac - 0.5)));
         oCtx.beginPath();
         oCtx.arc(x, y, dotR, 0, Math.PI * 2);
@@ -445,13 +440,13 @@ export function renderStudioFrame(
       }
     }
   } else if (style === 'smooth_osc') {
-    // 6. Smooth Continuous Organic Bezier Wave Stroke (layered with soft echo ribbon)
-    const pts = 72;
-    const maxAmp = h * 0.155;
+    // 6. Smooth Continuous Organic Bezier Wave (Phase-locked to pitch spectrum, no fake scrolling)
+    const pts = 64;
+    const maxAmp = h * 0.16;
 
     const layers = [
-      { freq: 4.5, phaseMult: 0.022, phaseOffset: 1.1, alpha: 0.42, lw: 6.5 },
-      { freq: 5.5, phaseMult: 0.028, phaseOffset: 0.0, alpha: 0.95, lw: 4.0 },
+      { sign: -0.68, alpha: 0.45, lw: 6.2 },
+      { sign: 1.0, alpha: 0.95, lw: 4.0 },
     ];
 
     for (const layer of layers) {
@@ -459,14 +454,9 @@ export function renderStudioFrame(
       for (let i = 0; i < pts; i++) {
         const u = i / (pts - 1);
         const x = xStart + u * spanW;
-        const val = sampleMusicalSpec(specCol, u, bassVal);
-        const osc = Math.sin(u * Math.PI * layer.freq + framePhase * layer.phaseMult + layer.phaseOffset);
-        const y =
-          osc *
-          (0.05 + Math.pow(val, 1.12) * 0.95) *
-          maxAmp *
-          taperEnvelope(u) *
-          (1 + bassVal * 0.32);
+        const val = sampleMusicalSpec(specCol, u, true);
+        const carrier = Math.sin(u * Math.PI * 5.0);
+        const y = carrier * layer.sign * Math.pow(val, 1.08) * maxAmp * taperEnvelope(u);
         coords.push([x, y]);
       }
       oCtx.beginPath();
@@ -481,24 +471,24 @@ export function renderStudioFrame(
     // 7. Symmetrical Vertical Needles with Soft Feathered Tips
     const count = 84;
     const step = spanW / count;
-    const maxHalfH = h * 0.155;
+    const maxHalfH = h * 0.16;
     oCtx.lineWidth = Math.max(1.6, 2.7 * scaleFactor);
     oCtx.lineCap = 'round';
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, true);
       const col = sampleColor3(c1, cMid, c2, u);
       const halfH = Math.max(
-        2.5 * scaleFactor,
-        (0.04 + Math.pow(val, 1.18) * 0.96) * maxHalfH * taperEnvelope(u) * (1 + bassVal * 0.32)
+        2.2 * scaleFactor,
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + (i + 0.5) * step;
 
       const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
-      vGrad.addColorStop(0, rgbStr(col, 0.25));
+      vGrad.addColorStop(0, rgbStr(col, 0.28));
       vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.25), 0.96));
-      vGrad.addColorStop(1, rgbStr(col, 0.25));
+      vGrad.addColorStop(1, rgbStr(col, 0.28));
 
       oCtx.strokeStyle = vGrad;
       oCtx.beginPath();
@@ -510,25 +500,25 @@ export function renderStudioFrame(
     // 8. Soft Feathered Silk Aurora Curtain
     const count = 120;
     const step = spanW / count;
-    const maxHalfH = h * 0.17;
+    const maxHalfH = h * 0.175;
     oCtx.lineWidth = Math.max(2.0, step * 1.15);
     oCtx.lineCap = 'round';
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, true);
       const col = sampleColor3(c1, cMid, c2, u);
       const halfH = Math.max(
-        4 * scaleFactor,
-        (0.05 + Math.pow(val, 1.12) * 0.95) * maxHalfH * Math.sin(u * Math.PI) * (1 + bassVal * 0.32)
+        3.5 * scaleFactor,
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + i * step;
 
       const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
       vGrad.addColorStop(0, rgbStr(col, 0));
-      vGrad.addColorStop(0.25, rgbStr(col, 0.42));
-      vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.32), 0.82));
-      vGrad.addColorStop(0.75, rgbStr(col, 0.42));
+      vGrad.addColorStop(0.25, rgbStr(col, 0.44));
+      vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.32), 0.85));
+      vGrad.addColorStop(0.75, rgbStr(col, 0.44));
       vGrad.addColorStop(1, rgbStr(col, 0));
 
       oCtx.strokeStyle = vGrad;
@@ -538,11 +528,11 @@ export function renderStudioFrame(
       oCtx.stroke();
     }
   } else if (style === 'prism_peaks') {
-    // 9. Inner-Glow Gradient Pill Capsules (Image 2: Closely-packed vertical rounded capsules glowing bright in the center and softly diffusing toward tips)
+    // 9. Inner-Glow Gradient Pill Capsules (Image 2: True pitch/beat-synced capsules without artificial timer cadence)
     const count = 39;
     const step = spanW / count;
     const barW = Math.max(5.5 * scaleFactor, step * 0.64);
-    const maxHalfH = h * 0.17;
+    const maxHalfH = h * 0.175;
     oCtx.lineCap = 'round';
     oCtx.lineWidth = barW;
 
@@ -550,26 +540,19 @@ export function renderStudioFrame(
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
-      const centerPeak = Math.exp(-Math.pow((u - 0.5) / 0.145, 2));
-      const sidePeaks =
-        0.54 * Math.exp(-Math.pow((u - 0.24) / 0.12, 2)) +
-        0.54 * Math.exp(-Math.pow((u - 0.76) / 0.12, 2));
-      const cadence = 0.84 + 0.16 * Math.cos(i * 1.25 + framePhase * 0.02);
-      const contour = (0.16 + 0.84 * Math.min(1, centerPeak + sidePeaks)) * cadence;
-
+      const val = sampleMusicalSpec(specCol, u, true);
       const halfH = Math.max(
-        barW * 0.45,
-        (0.05 + Math.pow(val, 1.14) * 0.95) * contour * maxHalfH * (1 + bassVal * 0.34)
+        barW * 0.42,
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + (i + 0.5) * step;
 
       const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
-      vGrad.addColorStop(0, rgbStr(c2, 0.72));
+      vGrad.addColorStop(0, rgbStr(c2, 0.76));
       vGrad.addColorStop(0.26, rgbStr(cMid, 0.94));
       vGrad.addColorStop(0.5, rgbStr(coreCol, 1.0));
       vGrad.addColorStop(0.74, rgbStr(cMid, 0.94));
-      vGrad.addColorStop(1, rgbStr(c2, 0.72));
+      vGrad.addColorStop(1, rgbStr(c2, 0.76));
 
       oCtx.strokeStyle = vGrad;
       oCtx.beginPath();
@@ -578,38 +561,37 @@ export function renderStudioFrame(
       oCtx.stroke();
     }
   } else if (style === 'brush_spectrum') {
-    // 10. Painterly Soft Brush Spectrum Band
+    // 10. Painterly Soft Brush Spectrum Band (Pure pitch spectrum without fake timer ripple)
     const count = 110;
     const step = spanW / count;
-    const maxHalfH = h * 0.15;
+    const maxHalfH = h * 0.155;
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, false);
       const col = sampleColor3(c1, cMid, c2, u);
-      const micro = 0.82 + 0.18 * Math.sin(i * 1.4 + framePhase * 0.025);
       const halfH = Math.max(
         2 * scaleFactor,
-        (0.04 + Math.pow(val, 1.15) * 0.96) * maxHalfH * micro * taperEnvelope(u) * (1 + bassVal * 0.3)
+        Math.pow(val, 1.08) * maxHalfH * taperEnvelope(u)
       );
       const x = xStart + i * step;
 
       const vGrad = oCtx.createLinearGradient(x, -halfH, x, halfH);
-      vGrad.addColorStop(0, rgbStr(col, 0.15));
-      vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.28), 0.88));
-      vGrad.addColorStop(1, rgbStr(col, 0.15));
+      vGrad.addColorStop(0, rgbStr(col, 0.18));
+      vGrad.addColorStop(0.5, rgbStr(lerpColor(col, [255, 255, 255], 0.28), 0.9));
+      vGrad.addColorStop(1, rgbStr(col, 0.18));
 
       oCtx.fillStyle = vGrad;
       oCtx.fillRect(x, -halfH, Math.max(1.8, step * 0.9), halfH * 2);
     }
   } else if (style === 'harmonic_waves') {
-    // 11. Overlapping Harmonic Ribbons with Smooth Bezier Crests
+    // 11. Overlapping Harmonic Ribbons (Driven by Low, Mid, and High musical pitch regions without fake phase scrolling)
     const pts = 68;
-    const maxAmp = h * 0.145;
+    const maxAmp = h * 0.155;
     const bands = [
-      { freq: 2.8, phase: 0.0, col: c1, fillAlpha: 0.25 },
-      { freq: 4.0, phase: 1.5, col: cMid, fillAlpha: 0.26 },
-      { freq: 5.2, phase: 3.0, col: c2, fillAlpha: 0.26 },
+      { bandOffset: 0.0, bandScale: 0.45, dir: 1, col: c1, fillAlpha: 0.26 },
+      { bandOffset: 0.25, bandScale: 0.5, dir: -1, col: cMid, fillAlpha: 0.26 },
+      { bandOffset: 0.5, bandScale: 0.45, dir: 1, col: c2, fillAlpha: 0.26 },
     ];
 
     for (const b of bands) {
@@ -618,12 +600,12 @@ export function renderStudioFrame(
       for (let i = 0; i < pts; i++) {
         const u = i / (pts - 1);
         const x = xStart + u * spanW;
-        const val = sampleMusicalSpec(specCol, u, bassVal);
-        const wave = Math.sin(u * Math.PI * b.freq + framePhase * 0.026 + b.phase);
-        const amp =
-          (0.05 + Math.pow(val, 1.14) * 0.95) * maxAmp * taperEnvelope(u) * (1 + bassVal * 0.3);
-        top.push([x, wave * amp]);
-        bot.push([x, -wave * amp * 0.65]);
+        const dist = Math.abs(u - 0.5) * 2;
+        const subBandU = Math.min(0.95, b.bandOffset + (1 - dist) * b.bandScale);
+        const val = sampleSpec(specCol, subBandU);
+        const amp = Math.pow(val, 1.08) * maxAmp * taperEnvelope(u);
+        top.push([x, b.dir * amp]);
+        bot.push([x, -b.dir * amp * 0.62]);
       }
 
       oCtx.beginPath();
@@ -635,26 +617,26 @@ export function renderStudioFrame(
 
       oCtx.beginPath();
       drawSmoothCurve(oCtx, top);
-      oCtx.strokeStyle = rgbStr(b.col, 0.9);
+      oCtx.strokeStyle = rgbStr(b.col, 0.92);
       oCtx.lineWidth = Math.max(1.8, 2.5 * scaleFactor);
       oCtx.lineCap = 'round';
       oCtx.lineJoin = 'round';
       oCtx.stroke();
     }
   } else if (style === 'dot_mountains') {
-    // 12. Glowing Laser Waveform + Bokeh Sparkles (Image 3: Smooth laser peaks synced to audio + dreamy bokeh & sparkles)
+    // 12. Glowing Laser Waveform + Bokeh Sparkles (Image 3: Phase-locked to true musical spectrum, zero fake scrolling)
     const maxAmp = h * 0.175;
 
-    // Layer A: Soft out-of-focus bokeh circles in background
+    // Layer A: Soft out-of-focus bokeh circles in background (glowing brighter when that frequency band hits)
     const bokehCount = 20;
     for (let b = 0; b < bokehCount; b++) {
       const bu = (b + 0.5) / bokehCount;
-      const bVal = sampleMusicalSpec(specCol, bu, bassVal);
-      const bx = xStart + bu * spanW + Math.sin(b * 4.1 + framePhase * 0.015) * 16 * scaleFactor;
-      const by = Math.cos(b * 2.7 + framePhase * 0.018) * maxAmp * (0.28 + bVal * 0.42);
-      const br = (12 + (b % 4) * 7.5) * scaleFactor * (0.85 + bVal * 0.3 + bassVal * 0.25);
+      const bVal = sampleMusicalSpec(specCol, bu, true);
+      const bx = xStart + bu * spanW;
+      const by = Math.sin(b * 2.3) * maxAmp * 0.45;
+      const br = (11 + (b % 4) * 7.0) * scaleFactor * (0.8 + bVal * 0.45);
       const bCol = sampleColor3(c1, cMid, c2, bu);
-      oCtx.fillStyle = rgbStr(bCol, 0.12 + bVal * 0.1);
+      oCtx.fillStyle = rgbStr(bCol, 0.08 + bVal * 0.16);
       oCtx.beginPath();
       oCtx.arc(bx, by, br, 0, Math.PI * 2);
       oCtx.fill();
@@ -674,32 +656,20 @@ export function renderStudioFrame(
     oCtx.lineTo(xEnd, 0);
     oCtx.stroke();
 
-    // Layer C: Smooth audio-synced laser wave + vertical light flares on strong peaks
-    const pts = 108;
+    // Layer C: Stationary-carrier laser waveform driven 100% by the real audio spectrum at each point
+    const pts = 96;
     const waveCoords: Array<[number, number, number]> = [];
     for (let i = 0; i < pts; i++) {
       const u = i / (pts - 1);
       const x = xStart + u * spanW;
-      const val = sampleMusicalSpec(specCol, u, bassVal);
-      const mainCluster = Math.exp(-Math.pow((u - 0.5) / 0.075, 2));
-      const leftCluster = 0.74 * Math.exp(-Math.pow((u - 0.08) / 0.08, 2));
-      const rightCluster = 0.76 * Math.exp(-Math.pow((u - 0.78) / 0.08, 2));
-      const baseBed = 0.22 * Math.sin(u * Math.PI);
-      const env = Math.min(1.15, baseBed + mainCluster + leftCluster + rightCluster);
-      // Slow, silky phase modulation so peaks rise & fall with the music instead of vibrating rapidly
-      const carrier =
-        Math.sin(i * 1.45 + framePhase * 0.032) * 0.74 +
-        Math.cos(i * 0.75 - framePhase * 0.022) * 0.26;
-      const y =
-        carrier *
-        (0.05 + Math.pow(val, 1.15) * 0.95) *
-        env *
-        maxAmp *
-        (1 + bassVal * 0.36);
+      const val = sampleMusicalSpec(specCol, u, true);
+      // Stationary alternating harmonic carrier (NO framePhase!) so peaks only move when the music hits
+      const carrier = Math.sin(i * 1.55) * 0.75 + Math.cos(i * 0.78) * 0.25;
+      const y = carrier * Math.pow(val, 1.08) * maxAmp * taperEnvelope(u);
       waveCoords.push([x, y, u]);
 
-      // Soft vertical light flare on tall peaks (like Image 3)
-      if (Math.abs(y) > maxAmp * 0.22) {
+      // Soft vertical light flare on active peaks
+      if (Math.abs(y) > maxAmp * 0.2) {
         const flareH = Math.abs(y) * 1.28;
         const flareCol = sampleColor3(c1, cMid, c2, u);
         const fGrad = oCtx.createLinearGradient(x, -flareH, x, flareH);
@@ -731,32 +701,28 @@ export function renderStudioFrame(
     oCtx.lineWidth = Math.max(1.2, 1.8 * scaleFactor);
     oCtx.stroke();
 
-    // Layer D: Floating sparkle particles drifting gently around the laser waveform
-    const sparkCount = 42;
+    // Layer D: Sparkle particles pulsing cleanly with local audio energy
+    const sparkCount = 40;
     for (let s = 0; s < sparkCount; s++) {
       const su = (s + 0.3) / sparkCount;
       const sx = xStart + su * spanW;
-      const sVal = sampleMusicalSpec(specCol, su, bassVal);
-      const sy =
-        Math.sin(s * 3.7 + framePhase * 0.025) *
-        maxAmp *
-        (0.08 + sVal * 0.52) *
-        Math.sin(su * Math.PI);
-      const sr = Math.max(1.4, (1.6 + (s % 3) * 1.1 + sVal * 1.2 + bassVal * 0.9) * scaleFactor);
+      const sVal = sampleMusicalSpec(specCol, su, true);
+      const sy = Math.sin(s * 3.7) * maxAmp * (0.06 + sVal * 0.55) * taperEnvelope(su);
+      const sr = Math.max(1.2, (1.2 + sVal * 2.2) * scaleFactor);
       const sCol = sampleColor3(c1, cMid, c2, su);
 
-      oCtx.fillStyle = rgbStr(sCol, 0.72);
+      oCtx.fillStyle = rgbStr(sCol, 0.35 + sVal * 0.55);
       oCtx.beginPath();
       oCtx.arc(sx, sy, sr * 1.6, 0, Math.PI * 2);
       oCtx.fill();
 
-      oCtx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      oCtx.fillStyle = `rgba(255, 255, 255, ${0.45 + sVal * 0.5})`;
       oCtx.beginPath();
       oCtx.arc(sx, sy, sr * 0.62, 0, Math.PI * 2);
       oCtx.fill();
     }
   } else if (style === 'double_flame') {
-    // 13. Mirrored LED Square Matrix with Center Gap (Image 4: Smoothly fading tip blocks & true audio sync)
+    // 13. Mirrored LED Square Matrix with Center Gap (Image 4: True 52-column spectrum analyzer with smooth fractional tips)
     const cols = 52;
     const stepX = spanW / cols;
     const cellW = Math.max(3.2 * scaleFactor, stepX * 0.68);
@@ -767,24 +733,10 @@ export function renderStudioFrame(
 
     for (let i = 0; i < cols; i++) {
       const u = i / (cols - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
-      const ridge =
-        0.72 +
-        0.28 *
-          Math.abs(
-            Math.sin(u * Math.PI * 5.5 + framePhase * 0.02) * 0.65 +
-              Math.cos(i * 1.2) * 0.35
-          );
+      const val = sampleMusicalSpec(specCol, u, false);
       const exactRows = Math.max(
-        0.65,
-        Math.min(
-          maxHalfRows,
-          (0.06 + Math.pow(val, 1.12) * 0.94) *
-            ridge *
-            maxHalfRows *
-            taperEnvelope(u) *
-            (1 + bassVal * 0.3)
-        )
+        0.5,
+        Math.min(maxHalfRows, Math.pow(val, 1.08) * maxHalfRows * taperEnvelope(u))
       );
       const activeRows = Math.max(1, Math.ceil(exactRows));
       const x = xStart + i * stepX + (stepX - cellW) / 2;
@@ -797,6 +749,7 @@ export function renderStudioFrame(
         const rowCol = sampleColor3(c1, cMid, c2, vFrac);
         const yTop = -centerGap / 2 - (r + 1) * cellH - r * gapY;
         const yBot = centerGap / 2 + r * (cellH + gapY);
+
         oCtx.fillStyle = rgbStr(rowCol, 0.94 * tipAlpha);
         oCtx.fillRect(x, yTop, cellW, cellH);
 
@@ -805,13 +758,13 @@ export function renderStudioFrame(
       }
     }
   } else if (style === 'triple_sine') {
-    // 14. Three Intertwined Glowing Sine Ribbons (Smooth Bezier curves & slow liquid phase)
-    const pts = 76;
-    const maxAmp = h * 0.14;
+    // 14. Three Intertwined Glowing Sine Ribbons (Synced to Low, Mid, and High pitch bands without fake timer spin)
+    const pts = 72;
+    const maxAmp = h * 0.145;
     const ribbons = [
-      { phase: 0.0, col: c1, lw: 3.8 },
-      { phase: 2.1, col: cMid, lw: 3.4 },
-      { phase: 4.2, col: c2, lw: 3.6 },
+      { phase: 0.0, bandShift: 0.0, col: c1, lw: 3.8 },
+      { phase: 2.1, bandShift: 0.28, col: cMid, lw: 3.4 },
+      { phase: 4.2, bandShift: 0.55, col: c2, lw: 3.6 },
     ];
 
     for (const r of ribbons) {
@@ -819,13 +772,13 @@ export function renderStudioFrame(
       for (let i = 0; i < pts; i++) {
         const u = i / (pts - 1);
         const x = xStart + u * spanW;
-        const val = sampleMusicalSpec(specCol, u, bassVal);
+        const bandU = Math.min(0.95, u * 0.45 + r.bandShift);
+        const val = sampleSpec(specCol, bandU);
         const y =
-          Math.sin(u * Math.PI * 5.2 + framePhase * 0.028 + r.phase) *
-          (0.05 + Math.pow(val, 1.12) * 0.95) *
+          Math.sin(u * Math.PI * 4.5 + r.phase) *
+          Math.pow(val, 1.08) *
           maxAmp *
-          taperEnvelope(u) *
-          (1 + bassVal * 0.3);
+          taperEnvelope(u);
         coords.push([x, y]);
       }
       oCtx.beginPath();
@@ -837,30 +790,28 @@ export function renderStudioFrame(
       oCtx.stroke();
     }
   } else if (style === 'seismic_line') {
-    // 15. Equalizer Bars with Floating Peak Caps & Water Reflection (Image 5)
+    // 15. Equalizer Bars with Floating Peak Caps & Water Reflection (Image 5: True 18-band equalizer without fake pulse timer)
     const count = 18;
     const step = spanW / count;
     const barW = Math.max(6 * scaleFactor, step * 0.58);
     const capH = Math.max(3.2 * scaleFactor, barW * 0.15);
-    const maxBarH = h * 0.155;
+    const maxBarH = h * 0.16;
     const lineThickness = Math.max(2.2 * scaleFactor, 3.2 * scaleFactor);
 
     for (let i = 0; i < count; i++) {
       const u = i / (count - 1);
-      const val = sampleMusicalSpec(specCol, u, bassVal);
+      const val = sampleMusicalSpec(specCol, u, true);
       const col = sampleColor3(c1, cMid, c2, u);
-      const arch = 0.32 + 0.68 * Math.sin(u * Math.PI);
-      const pulse = 0.86 + 0.14 * Math.sin(i * 1.35 + framePhase * 0.022);
       const barH = Math.max(
-        5 * scaleFactor,
-        (0.05 + Math.pow(val, 1.14) * 0.95) * arch * pulse * maxBarH * (1 + bassVal * 0.32)
+        4 * scaleFactor,
+        Math.pow(val, 1.08) * maxBarH * taperEnvelope(u)
       );
-      const capGap = Math.max(6 * scaleFactor, (7 + val * 12 + bassVal * 6) * scaleFactor);
+      const capGap = Math.max(5 * scaleFactor, (5 + val * 14) * scaleFactor);
       const x = xStart + i * step + (step - barW) / 2;
 
       // Upper main equalizer bar with soft top glow gradient
       const barGrad = oCtx.createLinearGradient(0, -lineThickness / 2 - barH, 0, -lineThickness / 2);
-      barGrad.addColorStop(0, rgbStr(lerpColor(col, [255, 255, 255], 0.18), 0.92));
+      barGrad.addColorStop(0, rgbStr(lerpColor(col, [255, 255, 255], 0.18), 0.94));
       barGrad.addColorStop(1, rgbStr(col, 0.98));
       oCtx.fillStyle = barGrad;
       oCtx.fillRect(x, -lineThickness / 2 - barH, barW, barH);
@@ -889,9 +840,7 @@ export function renderStudioFrame(
 
   oCtx.restore();
 
-  // 3. 3-Layer Soft Atmospheric Neon Bloom ("ฟุ้งและนุ่มนวล") scaled by user opacity & bass pulse
-  const bloomBoost = 1 + bassVal * 0.22;
-
+  // 3. 3-Layer Soft Atmospheric Neon Bloom ("ฟุ้งและนุ่มนวล") scaled by user opacity
   // Layer 3A: Wide Dreamy Atmospheric Aura (low-res glowCanvas upscaled)
   const gCtx = glowCanvas.getContext('2d')!;
   gCtx.clearRect(0, 0, glowCanvas.width, glowCanvas.height);
@@ -913,10 +862,10 @@ export function renderStudioFrame(
   targetCtx.save();
   targetCtx.globalCompositeOperation = 'lighter';
   // Wide atmospheric bloom
-  targetCtx.globalAlpha = Math.min(1, 0.92 * wfLayout.opacity * bloomBoost);
+  targetCtx.globalAlpha = 0.92 * wfLayout.opacity;
   targetCtx.drawImage(glowCanvas, 0, 0, w, h);
   // Medium silky halo
-  targetCtx.globalAlpha = Math.min(1, 0.68 * wfLayout.opacity * bloomBoost);
+  targetCtx.globalAlpha = 0.68 * wfLayout.opacity;
   targetCtx.drawImage(workCanvas, 0, 0, w, h);
   // Softly feathered core waveform
   targetCtx.globalAlpha = 0.88 * wfLayout.opacity;
