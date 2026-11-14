@@ -132,11 +132,11 @@ export const ArchitectureGuideView: React.FC<ArchitectureGuideViewProps> = ({
           </h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             คัดกรองเฉพาะคลื่นความถี่ต่ำด้วย STFT Bandpass 20Hz–150Hz (ซับเบสและกระเดื่องกลอง)
-            ผ่านสมการ Attack 65% / Release 18% และยกกำลัง 1.4 แล้วส่งไปควบคุม 3 เอฟเฟกต์พร้อมกัน:
+            ผ่านสมการ Attack 80% / Release 28% ยกกำลัง 1.35 พร้อมคำนวณ Onset Flux เพื่อควบคุม 3 เอฟเฟกต์พร้อมกัน:
           </p>
           <ul className="text-xs text-slate-400 space-y-1.5 list-disc list-inside">
-            <li>Dynamic Zoom Punch: ขยายภาพตามจังหวะเบส (1.00x – 1.20x)</li>
-            <li>Directional Micro-Shake: สั่นแกน X/Y เฉพาะช่วงเบสพุ่งเกิน 45%</li>
+            <li>Dynamic Zoom Punch: ขยายภาพตามจังหวะกระเดื่องกลอง (1.00x – 1.24x)</li>
+            <li>Directional Micro-Shake: สั่นแกน X/Y เฉพาะช่วง Onset Flux พุ่งเกิน 18%</li>
             <li>Luminance Flash Boost: เร่งความสว่างภาพชั่วเสี้ยววินาทีที่เบสลงหนัก</li>
           </ul>
         </article>
@@ -147,7 +147,7 @@ export const ArchitectureGuideView: React.FC<ArchitectureGuideViewProps> = ({
           </h2>
           <p className="text-sm text-slate-300 leading-relaxed">
             แบ่งสเปกตรัม Mel-Scale 64 ย่านตั้งแต่ 30Hz ถึง 12,000Hz กรองความนุ่มนวลด้วย
-            Gaussian Filter (sigma 0.9) วาดบนเลเยอร์โปร่งใสแล้วซ้อน Gaussian Blur
+            Gaussian Filter (sigma 0.65) วาดบนเลเยอร์โปร่งใสแล้วซ้อน Gaussian Blur
             แบบ Additive Blending 2 ชั้นเพื่อให้เกิดแสงฟุ้งเรืองแสงระดับสตูดิโอ
           </p>
           <p className="text-xs text-slate-400">
