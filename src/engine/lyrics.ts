@@ -164,7 +164,7 @@ export function getCueValidationError(cues: LyricCue[], duration?: number): stri
     if (cue.start < 0) return `บรรทัดที่ ${i + 1} เริ่มต้นก่อนเวลา 0`;
     if (cue.end <= cue.start) return `บรรทัดที่ ${i + 1} มีช่วงเวลาไม่ถูกต้อง`;
     if (i > 0 && cue.start < previousEnd) return `บรรทัดที่ ${i + 1} เวลาเรียงลำดับหรือทับซ้อนกัน`;
-    if (duration !== undefined && cue.end > duration) return `บรรทัดที่ ${i + 1} เกินความยาวเสียง`;
+    if (duration !== undefined && cue.end > duration + 1e-3) return `บรรทัดที่ ${i + 1} เกินความยาวเสียง`;
     previousEnd = cue.end;
   }
   return null;
