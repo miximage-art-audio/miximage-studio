@@ -271,8 +271,8 @@ export function analyzeAudioSamples(
   }
   const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.55);
 
-  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0
-  const bassOnsetFlux = new Float32Array(totalFrames);
+  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0, then softly cushioned
+  const bassOnsetFluxRaw = new Float32Array(totalFrames);
   for (let f = 0; f < totalFrames; f++) {
     const winStart = Math.max(0, f - 8);
     const count = f - winStart;
@@ -281,38 +281,55 @@ export function analyzeAudioSamples(
       sum += bassEnv[k];
     }
     const prevAvg = count > 0 ? sum / count : 0;
-    bassOnsetFlux[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
+    bassOnsetFluxRaw[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
   }
+  const bassOnsetFlux = gaussianFilter1dRow(bassOnsetFluxRaw, 0.75);
 
   let peakBassFrames = 0;
   for (let f = 0; f < totalFrames; f++) {
     if (bassEnv[f] > 0.45) peakBassFrames++;
   }
 
-  // Convert Mel power to dB relative to maxMelPower, normalize [-80, 0] -> [0, 1], smooth sigma=0.65
+  // Convert Mel power to musical dB range [-58, 0] -> [0, 1], apply liquid Attack/Release gravity + Gaussian smoothing (sigma=1.65)
+  const melAttack = 0.42;
+  const melRelease = 0.14;
   const tempMel: Float32Array[] = [];
   for (let m = 0; m < nBars; m++) {
-    const normRow = new Float32Array(totalFrames);
+    const envRow = new Float32Array(totalFrames);
+    let prevVal = 0;
     for (let f = 0; f < totalFrames; f++) {
       const ratio = Math.max(1e-10, melPower[m][f] / maxMelPower);
       const db = 10.0 * Math.log10(ratio);
-      const norm = Math.min(1.0, Math.max(0.0, (db + 80.0) / 80.0));
-      normRow[f] = norm;
+      const rawNorm = Math.min(1.0, Math.max(0.0, (db + 58.0) / 58.0));
+      const shaped = Math.pow(rawNorm, 1.32);
+      if (f === 0) {
+        prevVal = shaped;
+      } else if (shaped > prevVal) {
+        prevVal = melAttack * shaped + (1.0 - melAttack) * prevVal;
+      } else {
+        prevVal = melRelease * shaped + (1.0 - melRelease) * prevVal;
+      }
+      envRow[f] = prevVal;
     }
-    tempMel.push(gaussianFilter1dRow(normRow, 0.65));
+    tempMel.push(gaussianFilter1dRow(envRow, 1.65));
   }
 
-  // Gentle 3-tap spatial smoothing across adjacent Mel bands for fluid wave shapes
+  // Smooth 5-tap spatial blending across adjacent Mel bands for cohesive, liquid wave motion
   const melSpec: Float32Array[] = Array.from({ length: nBars }, () => new Float32Array(totalFrames));
   for (let m = 0; m < nBars; m++) {
-    const prevRow = tempMel[Math.max(0, m - 1)];
-    const currRow = tempMel[m];
-    const nextRow = tempMel[Math.min(nBars - 1, m + 1)];
+    const rM2 = tempMel[Math.max(0, m - 2)];
+    const rM1 = tempMel[Math.max(0, m - 1)];
+    const r0 = tempMel[m];
+    const rP1 = tempMel[Math.min(nBars - 1, m + 1)];
+    const rP2 = tempMel[Math.min(nBars - 1, m + 2)];
     for (let f = 0; f < totalFrames; f++) {
-      melSpec[m][f] = Math.min(
-        1.0,
-        Math.max(0.0, prevRow[f] * 0.14 + currRow[f] * 0.72 + nextRow[f] * 0.14)
-      );
+      const blended =
+        rM2[f] * 0.08 +
+        rM1[f] * 0.22 +
+        r0[f] * 0.40 +
+        rP1[f] * 0.22 +
+        rP2[f] * 0.08;
+      melSpec[m][f] = Math.min(1.0, Math.max(0.0, blended));
     }
   }
 
