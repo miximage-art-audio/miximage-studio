@@ -236,19 +236,28 @@ export function analyzeAudioSamples(
     bassRaw[f] = bassMean;
     if (bassMean > maxBassRaw) maxBassRaw = bassMean;
 
-    // Extract 64 Mel bands
+    // Extract 64 Mel bands (normalized by filter weight sum + perceptual frequency balance)
     for (let m = 0; m < nBars; m++) {
       const filter = melFilters[m];
       let bandEnergy = 0;
+      let weightSum = 0;
       for (let idx = 0; idx < filter.indices.length; idx++) {
-        bandEnergy += power[filter.indices[idx]] * filter.weights[idx];
+        const w = filter.weights[idx];
+        bandEnergy += power[filter.indices[idx]] * w;
+        weightSum += w;
       }
-      melPower[m][f] = bandEnergy;
-      if (bandEnergy > maxMelPower) maxMelPower = bandEnergy;
+      if (weightSum > 0) {
+        bandEnergy /= weightSum;
+      }
+      // Perceptual frequency tilt (+4.5 dB/octave equivalent) so mid/vocal/snare/high bands balance naturally with low bands
+      const freqTilt = 1.0 + Math.pow(m / Math.max(1, nBars - 1), 1.15) * 8.5;
+      const weightedEnergy = bandEnergy * freqTilt;
+      melPower[m][f] = weightedEnergy;
+      if (weightedEnergy > maxMelPower) maxMelPower = weightedEnergy;
     }
   }
 
-  // Normalize bass_raw & apply crisp Attack/Release Envelope (0.80 / 0.28)
+  // Normalize bass_raw & apply crisp Attack/Release Envelope (0.80 / 0.28) for Screen Bass-Sync
   if (maxBassRaw > 0) {
     for (let f = 0; f < totalFrames; f++) {
       bassRaw[f] /= maxBassRaw;
@@ -269,10 +278,10 @@ export function analyzeAudioSamples(
     }
     bassEnvRaw[f] = Math.pow(Math.max(0, envPrev), 1.35);
   }
-  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.55);
+  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.5);
 
-  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0, then softly cushioned
-  const bassOnsetFluxRaw = new Float32Array(totalFrames);
+  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0 (crisp kick onset for screen punch)
+  const bassOnsetFlux = new Float32Array(totalFrames);
   for (let f = 0; f < totalFrames; f++) {
     const winStart = Math.max(0, f - 8);
     const count = f - winStart;
@@ -281,27 +290,42 @@ export function analyzeAudioSamples(
       sum += bassEnv[k];
     }
     const prevAvg = count > 0 ? sum / count : 0;
-    bassOnsetFluxRaw[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
+    bassOnsetFlux[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
   }
-  const bassOnsetFlux = gaussianFilter1dRow(bassOnsetFluxRaw, 0.75);
 
   let peakBassFrames = 0;
   for (let f = 0; f < totalFrames; f++) {
     if (bassEnv[f] > 0.45) peakBassFrames++;
   }
 
-  // Convert Mel power to musical dB range [-58, 0] -> [0, 1], apply liquid Attack/Release gravity + Gaussian smoothing (sigma=1.65)
-  const melAttack = 0.42;
-  const melRelease = 0.14;
+  // Compute per-band peak reference blended with global peak so all musical pitches (bass, vocals, snare, melody, highs) register accurately
+  const bandRefMax = new Float32Array(nBars);
+  for (let m = 0; m < nBars; m++) {
+    let localMax = 0;
+    for (let f = 0; f < totalFrames; f++) {
+      if (melPower[m][f] > localMax) localMax = melPower[m][f];
+    }
+    bandRefMax[m] = Math.max(maxMelPower * 0.06, localMax * 0.68 + maxMelPower * 0.32);
+  }
+
+  // Zero-lag Beat/Pitch Envelope:
+  // Fast attack (hits on the exact millisecond of the beat/note) + smooth exponential gravity decay (glides down fluidly without jitter)
+  const fpsScale = 30.0 / Math.max(15, fps);
+  const melAttack = 1.0 - Math.pow(1.0 - 0.86, fpsScale);
+  const melRelease = 1.0 - Math.pow(1.0 - 0.24, fpsScale);
+
   const tempMel: Float32Array[] = [];
   for (let m = 0; m < nBars; m++) {
     const envRow = new Float32Array(totalFrames);
+    const refMax = Math.max(1e-10, bandRefMax[m]);
     let prevVal = 0;
     for (let f = 0; f < totalFrames; f++) {
-      const ratio = Math.max(1e-10, melPower[m][f] / maxMelPower);
+      const ratio = Math.max(1e-10, melPower[m][f] / refMax);
       const db = 10.0 * Math.log10(ratio);
-      const rawNorm = Math.min(1.0, Math.max(0.0, (db + 58.0) / 58.0));
-      const shaped = Math.pow(rawNorm, 1.32);
+      // Clean [-42 dB, 0 dB] noise-gated musical window (eliminates background FFT noise jitter)
+      const rawNorm = Math.min(1.0, Math.max(0.0, (db + 42.0) / 42.0));
+      const smoothNorm = rawNorm * rawNorm * (3.0 - 2.0 * rawNorm);
+      const shaped = Math.pow(smoothNorm, 1.18);
       if (f === 0) {
         prevVal = shaped;
       } else if (shaped > prevVal) {
@@ -311,7 +335,8 @@ export function analyzeAudioSamples(
       }
       envRow[f] = prevVal;
     }
-    tempMel.push(gaussianFilter1dRow(envRow, 1.65));
+    // Tight zero-phase smoothing (sigma=0.82) rounds peaks smoothly while keeping 0ms beat alignment
+    tempMel.push(gaussianFilter1dRow(envRow, 0.82 / fpsScale));
   }
 
   // Smooth 5-tap spatial blending across adjacent Mel bands for cohesive, liquid wave motion
@@ -324,11 +349,11 @@ export function analyzeAudioSamples(
     const rP2 = tempMel[Math.min(nBars - 1, m + 2)];
     for (let f = 0; f < totalFrames; f++) {
       const blended =
-        rM2[f] * 0.08 +
-        rM1[f] * 0.22 +
-        r0[f] * 0.40 +
-        rP1[f] * 0.22 +
-        rP2[f] * 0.08;
+        rM2[f] * 0.09 +
+        rM1[f] * 0.23 +
+        r0[f] * 0.36 +
+        rP1[f] * 0.23 +
+        rP2[f] * 0.09;
       melSpec[m][f] = Math.min(1.0, Math.max(0.0, blended));
     }
   }
