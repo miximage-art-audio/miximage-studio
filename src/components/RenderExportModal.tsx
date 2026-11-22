@@ -7,12 +7,6 @@ import {
   sampleDspAtTime,
 } from '../engine/dsp';
 import {
-  getCueValidationError,
-  LyricCue,
-  SubtitleStyle,
-} from '../engine/lyrics';
-import { drawLyricsOverlay } from '../engine/renderLyrics';
-import {
   ASPECT_RATIOS,
   AspectRatioKey,
   ColorThemeKey,
@@ -40,8 +34,6 @@ interface RenderExportModalProps {
   bassIntensity: number;
   fps: FpsOption;
   waveformLayout: WaveformLayoutConfig;
-  lyricCues: LyricCue[];
-  subtitleStyle: SubtitleStyle;
 }
 
 type RenderStatus = 'idle' | 'rendering' | 'done' | 'error';
@@ -224,8 +216,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   bassIntensity,
   fps,
   waveformLayout,
-  lyricCues,
-  subtitleStyle,
 }) => {
   const [status, setStatus] = useState<RenderStatus>('idle');
   const [progressPct, setProgressPct] = useState(0);
@@ -262,17 +252,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const handleStartRender = async () => {
     if (!imageEl || !audioSamples) {
       setErrorMsg('กรุณาเลือกรูปภาพและไฟล์เสียงก่อนเริ่มเรนเดอร์');
-      setStatus('error');
-      return;
-    }
-
-    const totalAudioSec =
-      audioSampleRate > 0 ? audioSamples.length / audioSampleRate : 0;
-    const invalidCue = lyricCues.length
-      ? getCueValidationError(lyricCues, totalAudioSec)
-      : null;
-    if (invalidCue) {
-      setErrorMsg(invalidCue);
       setStatus('error');
       return;
     }
@@ -430,14 +409,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           onsetFlux,
           colorMix
         );
-        drawLyricsOverlay(
-          renderCtx,
-          outW,
-          outH,
-          t,
-          lyricCues,
-          subtitleStyle
-        );
 
         const videoFrame = new VideoFrame(renderCanvas, {
           timestamp: Math.round(t * 1_000_000),
@@ -560,9 +531,6 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             <span>คลื่น: {style}</span>
             <span>สี: {theme}</span>
             <span>เบส: {bassIntensity.toFixed(1)}x</span>
-            {lyricCues.length > 0 && subtitleStyle.enabled && (
-              <span>ซับไตเติล: {lyricCues.length} บรรทัด</span>
-            )}
           </div>
 
           {(isBusy || status === 'done') && (

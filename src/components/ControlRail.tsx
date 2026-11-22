@@ -119,7 +119,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           />
         </div>
 
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
           {DEMO_ARTWORKS.map((art) => {
             const active = selectedArtworkId === art.id;
             return (
@@ -208,8 +208,12 @@ export const ControlRail: React.FC<ControlRailProps> = ({
         )}
       </div>
 
-      <hr className="border-slate-800/80" />
-      {children}
+      {children && (
+        <>
+          <hr className="border-slate-800/80" />
+          {children}
+        </>
+      )}
 
       <hr className="border-slate-800/80" />
 
@@ -410,7 +414,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
         </div>
 
         {/* Quick vertical position presets */}
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
           <button
             type="button"
             onClick={() => updateLayout({ posX: 0.5, posY: 0.2 })}
@@ -559,7 +563,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
           {BASS_INTENSITY_PRESETS.map((preset) => {
             const active = Math.abs(bassIntensity - preset.value) < 0.025;
             return (

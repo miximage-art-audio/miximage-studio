@@ -4,9 +4,6 @@ import { CloudPipelineView } from './components/CloudPipelineView';
 import { ControlRail } from './components/ControlRail';
 import { RenderExportModal } from './components/RenderExportModal';
 import { StudioStage } from './components/StudioStage';
-import { LyricsPanel } from './components/LyricsPanel';
-import { autoSyncLyrics, DEFAULT_SUBTITLE_STYLE, LyricCue, SubtitleStyle } from './engine/lyrics';
-import { drawLyricsOverlay } from './engine/renderLyrics';
 import { TopBar, WorkspaceTab } from './components/TopBar';
 import {
   DspAnalysisResult,
@@ -96,10 +93,6 @@ export default function App() {
   const [currentBassVal, setCurrentBassVal] = useState<number>(0);
   const [currentOnsetFlux, setCurrentOnsetFlux] = useState<number>(0);
 
-  const [lyricCues, setLyricCues] = useState<LyricCue[]>([]);
-  const [lyricsText, setLyricsText] = useState('');
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
-
   // Refs for smooth animation & Web Audio playback
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const surfaceRef = useRef<RenderSurface | null>(null);
@@ -123,8 +116,6 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
-    lyricCues,
-    subtitleStyle,
   });
   paramsRef.current = {
     style,
@@ -134,8 +125,6 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
-    lyricCues,
-    subtitleStyle,
   };
 
   const customImgUrlRef = useRef<string | null>(null);
@@ -227,20 +216,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [audioSamples, audioSampleRate, fps]);
 
-  useEffect(() => {
-    if (audioSamples) {
-      setLyricCues((cues) =>
-        cues.length
-          ? autoSyncLyrics(
-              cues.map((cue) => cue.text),
-              audioSamples,
-              audioSampleRate
-            )
-          : cues
-      );
-    }
-  }, [audioSamples, audioSampleRate]);
-
   // 6. Render a single frame for a given playback time
   const drawFrameAtTime = useCallback((timeSec: number) => {
     const canvas = canvasRef.current;
@@ -274,14 +249,6 @@ export default function App() {
       onsetFlux,
       cMix
     );
-    drawLyricsOverlay(
-      ctx,
-      surface.width,
-      surface.height,
-      timeSec,
-      paramsRef.current.lyricCues,
-      paramsRef.current.subtitleStyle
-    );
     return { bassVal, onsetFlux };
   }, []);
 
@@ -303,8 +270,6 @@ export default function App() {
     fps,
     waveformLayout,
     dspResult,
-    lyricCues,
-    subtitleStyle,
     currentTime,
     drawFrameAtTime,
   ]);
@@ -667,27 +632,7 @@ export default function App() {
                 onChangeFps={setFps}
                 onChangeWaveformLayout={handleChangeWaveformLayout}
                 onResetWaveformLayout={handleResetWaveformLayout}
-              >
-                <LyricsPanel
-                  audioSamples={audioSamples}
-                  sampleRate={audioSampleRate}
-                  duration={audioSamples ? audioSamples.length / audioSampleRate : 0}
-                  currentTime={currentTime}
-                  isPlaying={isPlaying}
-                  keyboardEnabled={!isRenderModalOpen}
-                  cues={lyricCues}
-                  text={lyricsText}
-                  onChangeText={setLyricsText}
-                  onChangeCues={setLyricCues}
-                  subtitleStyle={subtitleStyle}
-                  onChangeStyle={setSubtitleStyle}
-                  getPlaybackTime={getPlaybackTime}
-                  onStartPlayback={() => {
-                    void startPlaybackAt(0);
-                  }}
-                  onSeek={handleSeek}
-                />
-              </ControlRail>
+              />
             </div>
           </div>
         )}
@@ -718,8 +663,6 @@ export default function App() {
         bassIntensity={bassIntensity}
         fps={fps}
         waveformLayout={waveformLayout}
-        lyricCues={lyricCues}
-        subtitleStyle={subtitleStyle}
       />
     </div>
   );

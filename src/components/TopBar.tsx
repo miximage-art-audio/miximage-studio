@@ -1,5 +1,6 @@
 import React from 'react';
 import { Film } from 'lucide-react';
+import miximageLogo from '../assets/images/miximage_logo.png';
 
 export type WorkspaceTab = 'studio' | 'code' | 'architecture' | 'guide';
 
@@ -28,13 +29,18 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header className="border-b border-slate-800/90 bg-[#0B101B]/95 backdrop-blur-sm sticky top-0 z-30 shrink-0">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-14 md:h-12 flex items-center justify-between gap-8">
-        {/* Zone 1: Brand wordmark (single line, no badges/subtext) */}
+        {/* Zone 1: Brand wordmark & Logo */}
         <button
           type="button"
           onClick={() => onSelectTab('studio')}
-          className="text-lg font-bold tracking-tight text-slate-50 whitespace-nowrap shrink-0 hover:text-sky-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded-md px-1"
+          className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-50 whitespace-nowrap shrink-0 hover:text-sky-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded-md px-1"
         >
-          MixImage Studio
+          <img
+            src={miximageLogo}
+            alt="MixImage Studio Logo"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-contain shrink-0 drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]"
+          />
+          <span className="font-bold tracking-tight">MixImage Studio</span>
         </button>
 
         {/* Zone 2: Clean single-line text navigation links */}
