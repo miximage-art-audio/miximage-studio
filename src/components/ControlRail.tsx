@@ -12,11 +12,9 @@ import {
   SUPPORTED_AUDIO_EXTENSIONS,
   SUPPORTED_IMAGE_EXTENSIONS,
   WAVEFORM_STYLES,
-  WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
   clampWaveformLayout,
-  getThemeColorMix,
 } from '../engine/presets';
 import { DEMO_ARTWORKS } from '../engine/demoArtworks';
 
@@ -29,7 +27,6 @@ interface ControlRailProps {
   fitMode: FitMode;
   style: WaveformStyle;
   theme: ColorThemeKey;
-  colorMix: WaveformColorMix;
   bassIntensity: number;
   fps: FpsOption;
   waveformLayout: WaveformLayoutConfig;
@@ -42,7 +39,6 @@ interface ControlRailProps {
   onChangeFitMode: (fit: FitMode) => void;
   onChangeStyle: (style: WaveformStyle) => void;
   onChangeTheme: (theme: ColorThemeKey) => void;
-  onChangeColorMix: (next: WaveformColorMix) => void;
   onChangeBassIntensity: (val: number) => void;
   onChangeFps: (fps: FpsOption) => void;
   onChangeWaveformLayout: (next: WaveformLayoutConfig) => void;
@@ -59,7 +55,6 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   fitMode,
   style,
   theme,
-  colorMix,
   bassIntensity,
   fps,
   waveformLayout,
@@ -72,7 +67,6 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   onChangeFitMode,
   onChangeStyle,
   onChangeTheme,
-  onChangeColorMix,
   onChangeBassIntensity,
   onChangeFps,
   onChangeWaveformLayout,
@@ -306,7 +300,6 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             const item = COLOR_THEMES[key];
             const active = theme === key;
             const c1 = `rgb(${item.c1Rgb.join(',')})`;
-            const cMid = `rgb(${item.cMidRgb.join(',')})`;
             const c2 = `rgb(${item.c2Rgb.join(',')})`;
             return (
               <button
@@ -325,69 +318,13 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                   <span
                     aria-hidden="true"
                     className="w-3.5 h-2.5 rounded-xs shrink-0"
-                    style={{ background: `linear-gradient(90deg, ${c1}, ${cMid}, ${c2})` }}
+                    style={{ background: `linear-gradient(90deg, ${c1}, ${c2})` }}
                   />
                   <span className="text-[11px] font-semibold truncate">{item.label}</span>
                 </div>
               </button>
             );
           })}
-        </div>
-
-        {/* 3-Color Custom Mixer */}
-        <div className="mt-1 rounded-lg border border-slate-800 bg-[#0D1320] p-2.5 flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-slate-200">
-              มิกซ์สีคลื่นเอง (ผสม 3 สี)
-            </span>
-            <button
-              type="button"
-              onClick={() => onChangeColorMix(getThemeColorMix(theme))}
-              className="text-[10px] font-medium text-sky-400 hover:text-sky-300 transition-colors"
-            >
-              รีเซ็ตตามธีม
-            </button>
-          </div>
-
-          <div
-            aria-hidden="true"
-            className="h-2 w-full rounded-full border border-slate-700/80"
-            style={{
-              background: `linear-gradient(90deg, ${colorMix.c1} 0%, ${colorMix.c2} 50%, ${colorMix.c3} 100%)`,
-            }}
-          />
-
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                { slot: 'c1', label: 'สีที่ 1 (ต้น)', val: colorMix.c1 },
-                { slot: 'c2', label: 'สีที่ 2 (กลาง)', val: colorMix.c2 },
-                { slot: 'c3', label: 'สีที่ 3 (ปลาย)', val: colorMix.c3 },
-              ] as const
-            ).map(({ slot, label, val }) => (
-              <label
-                key={slot}
-                className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-[#090D16] px-2 py-1 cursor-pointer hover:border-slate-600 transition-colors"
-              >
-                <input
-                  type="color"
-                  aria-label={label}
-                  value={val}
-                  onChange={(e) =>
-                    onChangeColorMix({
-                      ...colorMix,
-                      [slot]: e.target.value.toUpperCase(),
-                    })
-                  }
-                  className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-medium text-slate-300 truncate">{label}</div>
-                  <div className="text-[9px] font-mono text-slate-400 uppercase truncate">{val}</div>
-                </div>
-              </label>
-            ))}
-          </div>
         </div>
       </div>
 

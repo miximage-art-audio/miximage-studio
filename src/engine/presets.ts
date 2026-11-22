@@ -104,50 +104,11 @@ export const ASPECT_RATIOS: Record<AspectRatioKey, AspectRatioSpec> = {
   },
 };
 
-export interface WaveformColorMix {
-  c1: string;
-  c2: string;
-  c3: string;
-}
-
-export function hexToRgb(
-  hex: string,
-  fallback: [number, number, number] = [0, 240, 255]
-): [number, number, number] {
-  const clean = hex.trim().replace(/^#/, '');
-  if (/^[0-9a-fA-F]{6}$/.test(clean)) {
-    return [
-      parseInt(clean.slice(0, 2), 16),
-      parseInt(clean.slice(2, 4), 16),
-      parseInt(clean.slice(4, 6), 16),
-    ];
-  }
-  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
-    return [
-      parseInt(clean[0] + clean[0], 16),
-      parseInt(clean[1] + clean[1], 16),
-      parseInt(clean[2] + clean[2], 16),
-    ];
-  }
-  return fallback;
-}
-
-export function rgbToHex(rgb: [number, number, number]): string {
-  return (
-    '#' +
-    rgb
-      .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
-      .join('')
-      .toUpperCase()
-  );
-}
-
 export interface ColorThemeSpec {
   key: ColorThemeKey;
   label: string;
   description: string;
   c1Rgb: [number, number, number];
-  cMidRgb: [number, number, number];
   c2Rgb: [number, number, number];
   c1Bgr: [number, number, number];
   c2Bgr: [number, number, number];
@@ -157,53 +118,40 @@ export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
   cyberpunk: {
     key: 'cyberpunk',
     label: 'Cyberpunk',
-    description: 'ฟ้าไซแอน — ม่วงนีออน — ชมพูมาเจนตา',
+    description: 'ฟ้าไซแอน — ชมพูมาเจนตา',
     c1Rgb: [0, 240, 255],
-    cMidRgb: [138, 43, 226],
-    c2Rgb: [255, 0, 160],
+    c2Rgb: [180, 0, 255],
     c1Bgr: [255, 240, 0],
-    c2Bgr: [160, 0, 255],
+    c2Bgr: [255, 0, 180],
   },
   gold_fire: {
     key: 'gold_fire',
     label: 'Gold Fire',
-    description: 'ทองคำ — ส้มอำพัน — แดงเพลิง',
+    description: 'ทองคำ — ส้มเพลิง',
     c1Rgb: [255, 215, 0],
-    cMidRgb: [255, 128, 0],
-    c2Rgb: [255, 45, 0],
+    c2Rgb: [255, 60, 0],
     c1Bgr: [0, 215, 255],
-    c2Bgr: [0, 45, 255],
+    c2Bgr: [0, 60, 255],
   },
   ice_blue: {
     key: 'ice_blue',
     label: 'Ice Blue',
-    description: 'ขาวไอซ์บลู — ฟ้าอาร์กติก — น้ำเงินเข้ม',
+    description: 'ขาวไอซ์บลู — น้ำเงินเข้ม',
     c1Rgb: [180, 255, 255],
-    cMidRgb: [56, 189, 248],
-    c2Rgb: [37, 99, 235],
+    c2Rgb: [0, 100, 255],
     c1Bgr: [255, 255, 180],
-    c2Bgr: [235, 99, 37],
+    c2Bgr: [255, 100, 0],
   },
   emerald: {
     key: 'emerald',
     label: 'Emerald',
-    description: 'เขียวนีออน — เขียวมรกต — ฟ้าเทอร์ควอยซ์',
+    description: 'เขียวนีออน — เขียวมรกต',
     c1Rgb: [0, 255, 150],
-    cMidRgb: [16, 185, 129],
-    c2Rgb: [6, 182, 212],
+    c2Rgb: [80, 180, 0],
     c1Bgr: [150, 255, 0],
-    c2Bgr: [212, 182, 6],
+    c2Bgr: [0, 180, 80],
   },
 };
-
-export function getThemeColorMix(theme: ColorThemeKey): WaveformColorMix {
-  const spec = COLOR_THEMES[theme] ?? COLOR_THEMES.cyberpunk;
-  return {
-    c1: rgbToHex(spec.c1Rgb),
-    c2: rgbToHex(spec.cMidRgb),
-    c3: rgbToHex(spec.c2Rgb),
-  };
-}
 
 export const WAVEFORM_STYLES: Array<{
   key: WaveformStyle;
@@ -217,8 +165,8 @@ export const WAVEFORM_STYLES: Array<{
   },
   {
     key: 'layered_fluid',
-    label: 'แคปซูลสมมาตร',
-    description: 'แท่งคลื่นแคปซูลปลายมนสมมาตรบน-ล่างไล่เฉด 3 สีคมชัด',
+    label: 'คลื่นชั้นฟลูอิด',
+    description: 'คลื่นฟลูอิดซ้อน 3 ชั้นไล่เฉดสีนุ่มนวล',
   },
   {
     key: 'dot_halftone',
@@ -252,8 +200,8 @@ export const WAVEFORM_STYLES: Array<{
   },
   {
     key: 'prism_peaks',
-    label: 'แคปซูลไล่แสง',
-    description: 'แท่งแคปซูลปลายมนเรียงชิดไล่แสงสว่างจากแกนกลางสู่ปลายคลื่น',
+    label: 'พีระมิดคลื่น',
+    description: 'คลื่นทรงผลึกโปร่งแสงซ้อนทับสมมาตร',
   },
   {
     key: 'brush_spectrum',
@@ -267,13 +215,13 @@ export const WAVEFORM_STYLES: Array<{
   },
   {
     key: 'dot_mountains',
-    label: 'เลเซอร์ประกายดาว',
-    description: 'คลื่นเลเซอร์ความถี่สูงพร้อมเส้นแกนเรืองแสงและละอองโบเก้',
+    label: 'ภูเขาจุด 3D',
+    description: 'สันเขาจุด 3 มิติไต่ระดับตามสเปกตรัมความถี่',
   },
   {
     key: 'double_flame',
-    label: 'เมทริกซ์สะท้อนเงา',
-    description: 'ตารางบล็อก LED สะท้อนบน-ล่างเว้นร่องกลางไล่เฉด 3 สี',
+    label: 'เปลวสมมาตร',
+    description: 'เปลวคลื่นพลังงานซ้อนสมมาตรทรงพลัง',
   },
   {
     key: 'triple_sine',
@@ -282,8 +230,8 @@ export const WAVEFORM_STYLES: Array<{
   },
   {
     key: 'seismic_line',
-    label: 'อีควอขีดลอยสะท้อน',
-    description: 'แท่งสเปกตรัมพร้อมขีดยอดลอยตัวและเงาสะท้อนน้ำด้านล่าง',
+    label: 'เส้นซิงก์จังหวะ',
+    description: 'เส้นคลื่นซิงก์จังหวะสมมาตรเรียวปลายสองข้าง',
   },
 ];
 

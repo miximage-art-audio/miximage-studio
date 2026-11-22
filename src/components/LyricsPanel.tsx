@@ -30,9 +30,8 @@ function CueTimeInput({ label, value, duration, onCommit }: { label: string; val
     onBlur={() => {
       const next = Number(draft);
       if (draft.trim() && Number.isFinite(next)) {
-        const clamped = duration > 0 && next > duration && next <= duration + 1e-3 ? duration : next;
-        onCommit(clamped);
-        setDraft(String(Number(clamped.toFixed(3))));
+        onCommit(next);
+        setDraft(String(next));
       } else setDraft(String(Number(value.toFixed(3))));
     }}
     onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}

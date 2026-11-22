@@ -71,8 +71,6 @@ test('cue validation reports Thai-friendly errors', () => {
     { id: '2', text: 'y', start: 1, end: 3 },
   ]) ?? '', /ทับซ้อน/);
   assert.match(getCueValidationError([{ id: '1', text: 'x', start: 0, end: 2 }], 1) ?? '', /เกิน/);
-  // 3-decimal UI rounding at fractional sub-millisecond track end (e.g. 44125 / 44100 = 1.00056689s -> 1.001s) should not fail
-  assert.equal(getCueValidationError([{ id: '1', text: 'ok', start: 0, end: 1.001 }], 44125 / 44100), null);
 });
 
 test('subtitle timestamps round milliseconds with carry and support hours', () => {

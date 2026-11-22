@@ -105,20 +105,13 @@ def analyze_audio(wav_path, fps, n_bars=64):
         bass_raw = bass_raw / np.max(bass_raw)
 
     bass_env = np.zeros_like(bass_raw)
-    attack, release = 0.80, 0.28
+    attack, release = 0.42, 0.12
     for i in range(1, len(bass_raw)):
         if bass_raw[i] > bass_env[i - 1]:
             bass_env[i] = attack * bass_raw[i] + (1 - attack) * bass_env[i - 1]
         else:
             bass_env[i] = release * bass_raw[i] + (1 - release) * bass_env[i - 1]
-    bass_env = gaussian_filter1d(np.power(bass_env, 1.35), sigma=0.55)
-
-    # Onset Flux (พลังงานเบสเฟรมปัจจุบันลบค่าเฉลี่ยย้อนหลัง 8 เฟรม, clamp >= 0)
-    onset_flux = np.zeros_like(bass_env)
-    for i in range(len(bass_env)):
-        win_start = max(0, i - 8)
-        prev_avg = float(np.mean(bass_env[win_start:i])) if i > 0 else 0.0
-        onset_flux[i] = min(1.0, max(0.0, float(bass_env[i]) - prev_avg))
+    bass_env = gaussian_filter1d(np.power(bass_env, 1.35), sigma=0.75)
 
     # 2. สกัดสเปกตรัมความถี่ 64 แท่ง (30Hz - 12,000Hz) พร้อมกรองความนุ่มนวล
     mel_spec = librosa.feature.melspectrogram(
@@ -127,9 +120,9 @@ def analyze_audio(wav_path, fps, n_bars=64):
     mel_db = librosa.power_to_db(mel_spec, ref=np.max)
     mel_norm = (mel_db + 80.0) / 80.0
     mel_norm = np.clip(mel_norm, 0.0, 1.0)
-    mel_norm = gaussian_filter1d(mel_norm, sigma=0.65, axis=1)
+    mel_norm = gaussian_filter1d(mel_norm, sigma=1.45, axis=1)
 
-    return bass_env, onset_flux, mel_norm, len(bass_env)
+    return bass_env, mel_norm, len(bass_env)
 
 
 def prepare_base_image(img_path, target_w, target_h, fit_mode="cover"):
@@ -162,22 +155,22 @@ def prepare_base_image(img_path, target_w, target_h, fit_mode="cover"):
     return blurred_bg
 
 
-def apply_bass_transform(base_img, punch_val, intensity_mult):
+def apply_bass_transform(base_img, bass_val, intensity_mult):
     """
-    สร้างเอฟเฟกต์ภาพกระตุกตามจังหวะเบสด้วย Onset Flux (ขยายภาพ + แรงสั่นสะเทือน + แสงวาบ)
+    สร้างเอฟเฟกต์ภาพกระตุกตามจังหวะเบส (ขยายภาพ + แรงสั่นสะเทือน + แสงวาบ)
     """
     h, w = base_img.shape[:2]
-    zoom = 1.0 + (punch_val * 0.12 * intensity_mult)
+    zoom = 1.0 + (bass_val * 0.10 * intensity_mult)
 
-    shake_px = int(punch_val * 12 * intensity_mult) if punch_val > 0.18 else 0
+    shake_px = int(bass_val * 14 * intensity_mult) if bass_val > 0.45 else 0
     dx = np.random.randint(-shake_px, shake_px + 1) if shake_px > 0 else 0
     dy = np.random.randint(-shake_px, shake_px + 1) if shake_px > 0 else 0
 
     M = cv2.getRotationMatrix2D((w / 2 + dx, h / 2 + dy), 0, zoom)
     frame = cv2.warpAffine(base_img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
-    if punch_val > 0.15:
-        boost = 1.0 + (punch_val - 0.15) * 0.30 * intensity_mult
+    if bass_val > 0.3:
+        boost = 1.0 + (bass_val - 0.3) * 0.25 * intensity_mult
         frame = np.clip(frame.astype(np.float32) * boost, 0, 255).astype(np.uint8)
 
     return frame
@@ -345,7 +338,7 @@ def main():
     target_w, target_h = ASPECT_RATIOS[args.ratio]
     print(f"[ขั้นตอนที่ 1/4] กำลังถอดรหัสไฟล์เสียงและวิเคราะห์ย่านเบส (ขนาดภาพ {args.ratio} -> {target_w}x{target_h} พิกเซล)...")
     wav_path = convert_to_wav(args.audio)
-    bass_env, onset_flux, mel_spec, total_frames = analyze_audio(wav_path, args.fps)
+    bass_env, mel_spec, total_frames = analyze_audio(wav_path, args.fps)
 
     print(f"[ขั้นตอนที่ 2/4] กำลังเตรียมภาพพื้นหลังในโหมด '{args.fit}'...")
     base_img = prepare_base_image(args.image, target_w, target_h, args.fit)
@@ -365,9 +358,8 @@ def main():
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
     for f_idx in range(total_frames):
         b_val = bass_env[f_idx]
-        o_flux = onset_flux[f_idx]
         s_col = mel_spec[:, f_idx]
-        frame = apply_bass_transform(base_img, o_flux, args.bass)
+        frame = apply_bass_transform(base_img, b_val, args.bass)
         frame = draw_waveform(
             frame, s_col, b_val, args.style, args.theme,
             pos_x=args.pos_x, pos_y=args.pos_y,
@@ -522,23 +514,23 @@ jobs:
 
       - name: ค้นหาไฟล์ภาพและไฟล์เสียงอัตโนมัติพร้อมสั่งเรนเดอร์วิดีโอ
         run: |
-          IMAGE_FILE=$(find input/ -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.bmp" \) | head -n 1)
-          AUDIO_FILE=$(find input/ -type f \( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" -o -iname "*.wma" -o -iname "*.aiff" \) | head -n 1)
+          IMAGE_FILE=$(find input/ -type f \\( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.bmp" \\) | head -n 1)
+          AUDIO_FILE=$(find input/ -type f \\( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" -o -iname "*.wma" -o -iname "*.aiff" \\) | head -n 1)
           echo "ไฟล์ภาพที่ตรวจพบ: $IMAGE_FILE"
           echo "ไฟล์เสียงที่ตรวจพบ: $AUDIO_FILE"
-          python render_engine.py \
-            --image "$IMAGE_FILE" \
-            --audio "$AUDIO_FILE" \
-            --output "miximage_render.mp4" \
-            --ratio "\${{ inputs.aspect_ratio }}" \
-            --style "\${{ inputs.waveform_style }}" \
-            --theme "\${{ inputs.color_theme }}" \
-            --bass "\${{ inputs.bass_intensity }}" \
-            --fit "\${{ inputs.fit_mode }}" \
-            --fps "\${{ inputs.fps }}" \
-            --pos-x "\${{ inputs.pos_x }}" \
-            --pos-y "\${{ inputs.pos_y }}" \
-            --scale "\${{ inputs.waveform_scale }}" \
+          python render_engine.py \\
+            --image "$IMAGE_FILE" \\
+            --audio "$AUDIO_FILE" \\
+            --output "miximage_render.mp4" \\
+            --ratio "\${{ inputs.aspect_ratio }}" \\
+            --style "\${{ inputs.waveform_style }}" \\
+            --theme "\${{ inputs.color_theme }}" \\
+            --bass "\${{ inputs.bass_intensity }}" \\
+            --fit "\${{ inputs.fit_mode }}" \\
+            --fps "\${{ inputs.fps }}" \\
+            --pos-x "\${{ inputs.pos_x }}" \\
+            --pos-y "\${{ inputs.pos_y }}" \\
+            --scale "\${{ inputs.waveform_scale }}" \\
             --opacity "\${{ inputs.waveform_opacity }}"
 
       - name: อัปโหลดไฟล์วิดีโอที่เรนเดอร์เสร็จแล้วให้ดาวน์โหลด

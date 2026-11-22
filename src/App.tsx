@@ -12,7 +12,6 @@ import {
   DspAnalysisResult,
   analyzeAudioSamples,
   generateDemoBassTrack,
-  sampleDspAtTime,
 } from './engine/dsp';
 import {
   ASPECT_RATIOS,
@@ -20,11 +19,9 @@ import {
   ColorThemeKey,
   FitMode,
   FpsOption,
-  WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
   getDefaultWaveformLayout,
-  getThemeColorMix,
 } from './engine/presets';
 import { DEMO_ARTWORKS } from './engine/demoArtworks';
 import {
@@ -35,9 +32,11 @@ import {
 
 function getPreviewDimensions(ratio: AspectRatioKey): { w: number; h: number } {
   const spec = ASPECT_RATIOS[ratio];
+  const maxDim = 960;
+  const scale = maxDim / Math.max(spec.width, spec.height);
   return {
-    w: spec.width,
-    h: spec.height,
+    w: Math.round(spec.width * scale),
+    h: Math.round(spec.height * scale),
   };
 }
 
@@ -73,9 +72,6 @@ export default function App() {
   const [fitMode, setFitMode] = useState<FitMode>('cover');
   const [style, setStyle] = useState<WaveformStyle>('bars_3d');
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
-  const [colorMix, setColorMix] = useState<WaveformColorMix>(() =>
-    getThemeColorMix('cyberpunk')
-  );
   const [bassIntensity, setBassIntensity] = useState<number>(1.0);
   const [fps, setFps] = useState<FpsOption>(30);
   const [waveformLayout, setWaveformLayout] = useState<WaveformLayoutConfig>(() =>
@@ -94,7 +90,6 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0.48);
   const [currentBassVal, setCurrentBassVal] = useState<number>(0);
-  const [currentOnsetFlux, setCurrentOnsetFlux] = useState<number>(0);
 
   const [lyricCues, setLyricCues] = useState<LyricCue[]>([]);
   const [lyricsText, setLyricsText] = useState('');
@@ -118,7 +113,6 @@ export default function App() {
   const paramsRef = useRef({
     style,
     theme,
-    colorMix,
     bassIntensity,
     fps,
     dspResult,
@@ -126,17 +120,7 @@ export default function App() {
     lyricCues,
     subtitleStyle,
   });
-  paramsRef.current = {
-    style,
-    theme,
-    colorMix,
-    bassIntensity,
-    fps,
-    dspResult,
-    waveformLayout,
-    lyricCues,
-    subtitleStyle,
-  };
+  paramsRef.current = { style, theme, bassIntensity, fps, dspResult, waveformLayout, lyricCues, subtitleStyle };
 
   const customImgUrlRef = useRef<string | null>(null);
 
@@ -229,15 +213,7 @@ export default function App() {
 
   useEffect(() => {
     if (audioSamples) {
-      setLyricCues((cues) =>
-        cues.length
-          ? autoSyncLyrics(
-              cues.map((cue) => cue.text),
-              audioSamples,
-              audioSampleRate
-            )
-          : cues
-      );
+      setLyricCues(cues => cues.length ? autoSyncLyrics(cues.map(cue => cue.text), audioSamples, audioSampleRate) : cues);
     }
   }, [audioSamples, audioSampleRate]);
 
@@ -249,48 +225,45 @@ export default function App() {
       dspResult: dsp,
       style: s,
       theme: t,
-      colorMix: cMix,
       bassIntensity: bInt,
+      fps: curFps,
       waveformLayout: wfLayout,
     } = paramsRef.current;
-    if (!canvas || !surface || !dsp) return { bassVal: 0, onsetFlux: 0 };
+    if (!canvas || !surface || !dsp) return 0;
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return { bassVal: 0, onsetFlux: 0 };
+    if (!ctx) return 0;
+
+    const exactFrame = Math.min(
+      dsp.totalFrames - 1,
+      Math.max(0, timeSec * curFps)
+    );
+    const f0 = Math.floor(exactFrame);
+    const f1 = Math.min(dsp.totalFrames - 1, f0 + 1);
+    const frac = exactFrame - f0;
+    const smoothFrac = frac * frac * (3 - 2 * frac);
+
+    const bassVal =
+      (dsp.bassEnv[f0] ?? 0) * (1 - smoothFrac) +
+      (dsp.bassEnv[f1] ?? 0) * smoothFrac;
 
     const specCol = new Float32Array(64);
-    const { bassVal, onsetFlux, exactFrame } = sampleDspAtTime(dsp, timeSec, specCol);
+    for (let b = 0; b < 64; b++) {
+      const v0 = dsp.melSpec[b][f0] ?? 0;
+      const v1 = dsp.melSpec[b][f1] ?? 0;
+      specCol[b] = v0 * (1 - smoothFrac) + v1 * smoothFrac;
+    }
 
-    renderStudioFrame(
-      ctx,
-      surface,
-      specCol,
-      bassVal,
-      s,
-      t,
-      bInt,
-      exactFrame,
-      wfLayout,
-      onsetFlux,
-      cMix
-    );
-    drawLyricsOverlay(
-      ctx,
-      surface.width,
-      surface.height,
-      timeSec,
-      paramsRef.current.lyricCues,
-      paramsRef.current.subtitleStyle
-    );
-    return { bassVal, onsetFlux };
+    renderStudioFrame(ctx, surface, specCol, bassVal, s, t, bInt, exactFrame, wfLayout);
+    drawLyricsOverlay(ctx, surface.width, surface.height, timeSec, paramsRef.current.lyricCues, paramsRef.current.subtitleStyle);
+    return bassVal;
   }, []);
 
   // Re-draw static preview immediately whenever parameters, surface, or seek time change while paused
   useEffect(() => {
     if (activeTab !== 'studio' || playStateRef.current.isPlaying) return;
-    const { bassVal, onsetFlux } = drawFrameAtTime(playStateRef.current.offsetSec);
-    setCurrentBassVal(bassVal);
-    setCurrentOnsetFlux(onsetFlux);
+    const bVal = drawFrameAtTime(playStateRef.current.offsetSec);
+    setCurrentBassVal(bVal);
   }, [
     activeTab,
     loadedImage,
@@ -298,7 +271,6 @@ export default function App() {
     fitMode,
     style,
     theme,
-    colorMix,
     bassIntensity,
     fps,
     waveformLayout,
@@ -336,19 +308,17 @@ export default function App() {
         state.offsetSec = 0;
         setIsPlaying(false);
         setCurrentTime(0);
-        const { bassVal, onsetFlux } = drawFrameAtTime(0);
-        setCurrentBassVal(bassVal);
-        setCurrentOnsetFlux(onsetFlux);
+        const bVal = drawFrameAtTime(0);
+        setCurrentBassVal(bVal);
         return;
       }
 
-      const { bassVal, onsetFlux } = drawFrameAtTime(elapsed);
+      const bVal = drawFrameAtTime(elapsed);
 
       if (now - lastUiSync > 70) {
         lastUiSync = now;
         setCurrentTime(elapsed);
-        setCurrentBassVal(bassVal);
-        setCurrentOnsetFlux(onsetFlux);
+        setCurrentBassVal(bVal);
       }
 
       rafId = requestAnimationFrame(tick);
@@ -458,10 +428,9 @@ export default function App() {
 
   const getPlaybackTime = useCallback(() => {
     const state = playStateRef.current;
-    const elapsed =
-      state.isPlaying && audioCtxRef.current
-        ? audioCtxRef.current.currentTime - state.startedAtCtxTime
-        : 0;
+    const elapsed = state.isPlaying && audioCtxRef.current
+      ? audioCtxRef.current.currentTime - state.startedAtCtxTime
+      : 0;
     return Math.min(state.durationSec, Math.max(0, state.offsetSec + elapsed));
   }, []);
 
@@ -516,28 +485,9 @@ export default function App() {
         gainNodeRef.current.connect(decodeCtx.destination);
       }
 
-      let decodedBuffer: AudioBuffer | null = null;
-      try {
-        const rawBytes = await file.arrayBuffer();
-        decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
-      } catch {
-        // Fallback to server FFmpeg Universal Audio Pipeline when server is running
-        const form = new FormData();
-        form.append('audio', file);
-        const res = await fetch('/api/decode-audio', {
-          method: 'POST',
-          body: form,
-        });
-        if (!res.ok) {
-          throw new Error('เบราว์เซอร์อ่านไฟล์เสียงนี้ไม่ได้ กรุณาใช้ MP3 หรือ WAV PCM ที่รองรับ');
-        }
-        const wavBytes = await res.arrayBuffer();
-        decodedBuffer = await decodeCtx.decodeAudioData(wavBytes);
-      }
-
-      if (!decodedBuffer || !decodedBuffer.length || decodedBuffer.duration <= 0) {
-        throw new Error('ไฟล์เสียงไม่มีข้อมูล');
-      }
+      const rawBytes = await file.arrayBuffer();
+      const decodedBuffer = await decodeCtx.decodeAudioData(rawBytes);
+      if (!decodedBuffer.length || decodedBuffer.duration <= 0) throw new Error('ไฟล์เสียงไม่มีข้อมูล');
 
       const mono = mixAudioBufferToMono(decodedBuffer);
       audioBufferRef.current = decodedBuffer;
@@ -547,11 +497,7 @@ export default function App() {
       setAudioName(file.name);
       setIsDemoAudio(false);
     } catch (err) {
-      setAudioError(
-        err instanceof Error
-          ? err.message
-          : 'เบราว์เซอร์อ่านไฟล์เสียงนี้ไม่ได้ กรุณาใช้ MP3 หรือ WAV PCM ที่รองรับ'
-      );
+      setAudioError(`เบราว์เซอร์อ่านไฟล์เสียงนี้ไม่ได้ กรุณาใช้ MP3 หรือ WAV PCM ที่รองรับ โดยไม่มีการส่งไฟล์ไปยังเซิร์ฟเวอร์${err instanceof Error && err.message ? ` — ${err.message}` : ''}`);
       setIsAnalyzing(false);
     }
   };
@@ -562,11 +508,6 @@ export default function App() {
       const def = getDefaultWaveformLayout(nextStyle);
       setWaveformLayout((prev) => ({ ...prev, posX: def.posX, posY: def.posY }));
     }
-  };
-
-  const handleChangeTheme = (nextTheme: ColorThemeKey) => {
-    setTheme(nextTheme);
-    setColorMix(getThemeColorMix(nextTheme));
   };
 
   const handleChangeWaveformLayout = (next: WaveformLayoutConfig) => {
@@ -628,7 +569,6 @@ export default function App() {
                 currentTime={currentTime}
                 duration={dspResult?.durationSec ?? 16}
                 currentBassVal={currentBassVal}
-                currentOnsetFlux={currentOnsetFlux}
                 totalFrames={dspResult?.totalFrames ?? 0}
                 peakBassFrames={dspResult?.peakBassFrames ?? 0}
                 onTogglePlay={handleTogglePlay}
@@ -649,7 +589,6 @@ export default function App() {
                 fitMode={fitMode}
                 style={style}
                 theme={theme}
-                colorMix={colorMix}
                 bassIntensity={bassIntensity}
                 fps={fps}
                 waveformLayout={waveformLayout}
@@ -661,8 +600,7 @@ export default function App() {
                 onChangeRatio={setRatio}
                 onChangeFitMode={setFitMode}
                 onChangeStyle={handleChangeStyle}
-                onChangeTheme={handleChangeTheme}
-                onChangeColorMix={setColorMix}
+                onChangeTheme={setTheme}
                 onChangeBassIntensity={setBassIntensity}
                 onChangeFps={setFps}
                 onChangeWaveformLayout={handleChangeWaveformLayout}
@@ -682,9 +620,7 @@ export default function App() {
                   subtitleStyle={subtitleStyle}
                   onChangeStyle={setSubtitleStyle}
                   getPlaybackTime={getPlaybackTime}
-                  onStartPlayback={() => {
-                    void startPlaybackAt(0);
-                  }}
+                  onStartPlayback={() => { void startPlaybackAt(0); }}
                   onSeek={handleSeek}
                 />
               </ControlRail>
@@ -714,7 +650,6 @@ export default function App() {
         fitMode={fitMode}
         style={style}
         theme={theme}
-        colorMix={colorMix}
         bassIntensity={bassIntensity}
         fps={fps}
         waveformLayout={waveformLayout}
