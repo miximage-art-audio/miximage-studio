@@ -51,28 +51,26 @@ function sampleColor3(
 }
 
 /**
- * Prepares the offscreen base canvas implementing both `cover` and `blur_pad` modes.
+ * Updates the base canvas background with a new frame from an image, video, or canvas,
+ * implementing both `cover` and `blur_pad` modes.
  */
-export function createRenderSurface(
-  img: HTMLImageElement,
-  targetW: number,
-  targetH: number,
+export function updateRenderSurfaceBase(
+  surface: RenderSurface,
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
   fitMode: FitMode
-): RenderSurface {
-  const baseCanvas = document.createElement('canvas');
-  baseCanvas.width = targetW;
-  baseCanvas.height = targetH;
+): void {
+  const { baseCanvas, width: targetW, height: targetH } = surface;
   const ctx = baseCanvas.getContext('2d')!;
-
-  const srcW = img.naturalWidth || img.width || targetW;
-  const srcH = img.naturalHeight || img.height || targetH;
+  ctx.clearRect(0, 0, targetW, targetH);
   const geom = computeFitGeometry(srcW, srcH, targetW, targetH);
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
   if (fitMode === 'cover') {
-    ctx.drawImage(img, geom.cover.x, geom.cover.y, geom.cover.w, geom.cover.h);
+    ctx.drawImage(source, geom.cover.x, geom.cover.y, geom.cover.w, geom.cover.h);
   } else {
     // blur_pad: Gaussian blurred cover background dimmed by 55% (0.45 brightness) + centered full image
     const blurScale = Math.max(12, Math.round(Math.min(targetW, targetH) * 0.032));
@@ -80,7 +78,7 @@ export function createRenderSurface(
     ctx.filter = `blur(${blurScale}px) brightness(0.45)`;
     const pad = blurScale * 2;
     ctx.drawImage(
-      img,
+      source,
       geom.cover.x - pad,
       geom.cover.y - pad,
       geom.cover.w + pad * 2,
@@ -92,13 +90,27 @@ export function createRenderSurface(
     ctx.fillRect(0, 0, targetW, targetH);
 
     ctx.drawImage(
-      img,
+      source,
       geom.contain.x,
       geom.contain.y,
       geom.contain.w,
       geom.contain.h
     );
   }
+}
+
+/**
+ * Prepares the offscreen base canvas implementing both `cover` and `blur_pad` modes.
+ */
+export function createRenderSurface(
+  img: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+  targetW: number,
+  targetH: number,
+  fitMode: FitMode
+): RenderSurface {
+  const baseCanvas = document.createElement('canvas');
+  baseCanvas.width = targetW;
+  baseCanvas.height = targetH;
 
   const overlayCanvas = document.createElement('canvas');
   overlayCanvas.width = targetW;
@@ -112,7 +124,7 @@ export function createRenderSurface(
   workCanvas.width = targetW;
   workCanvas.height = targetH;
 
-  return {
+  const surface: RenderSurface = {
     baseCanvas,
     overlayCanvas,
     glowCanvas,
@@ -120,6 +132,21 @@ export function createRenderSurface(
     width: targetW,
     height: targetH,
   };
+
+  const srcW =
+    ('videoWidth' in img && img.videoWidth ? img.videoWidth : 0) ||
+    ('naturalWidth' in img && img.naturalWidth ? img.naturalWidth : 0) ||
+    img.width ||
+    targetW;
+  const srcH =
+    ('videoHeight' in img && img.videoHeight ? img.videoHeight : 0) ||
+    ('naturalHeight' in img && img.naturalHeight ? img.naturalHeight : 0) ||
+    img.height ||
+    targetH;
+
+  updateRenderSurfaceBase(surface, img, srcW, srcH, fitMode);
+
+  return surface;
 }
 
 function sampleSpec(specCol: Float32Array | number[], u: number): number {

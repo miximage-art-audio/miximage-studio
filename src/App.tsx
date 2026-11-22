@@ -28,6 +28,7 @@ import {
   RenderSurface,
   createRenderSurface,
   renderStudioFrame,
+  updateRenderSurfaceBase,
 } from './engine/renderer';
 
 function getPreviewDimensions(ratio: AspectRatioKey): { w: number; h: number } {
@@ -55,11 +56,19 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
   const [isRenderModalOpen, setIsRenderModalOpen] = useState(false);
 
-  // Studio Parameters
+  // Media state (Image or Video)
+  const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
   const [selectedArtworkId, setSelectedArtworkId] = useState<string>(DEMO_ARTWORKS[0].id);
   const [customImageName, setCustomImageName] = useState<string | null>(null);
   const [imageSrc, setImageSrc] = useState<string>(DEMO_ARTWORKS[0].src);
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
+
+  // Video State
+  const [loadedVideo, setLoadedVideo] = useState<HTMLVideoElement | null>(null);
+  const [videoDuration, setVideoDuration] = useState<number>(0);
+  const [customDuration, setCustomDuration] = useState<number | null>(null);
+  const [trimStartSec, setTrimStartSec] = useState<number>(0);
+  const customVideoUrlRef = useRef<string | null>(null);
 
   const [audioName, setAudioName] = useState<string>('Demo Bass Track (128 BPM · 16s)');
   const [isDemoAudio, setIsDemoAudio] = useState<boolean>(true);
@@ -86,10 +95,26 @@ export default function App() {
   const [audioBufferForRender, setAudioBufferForRender] = useState<AudioBuffer | null>(null);
   const [dspResult, setDspResult] = useState<DspAnalysisResult | null>(null);
 
+  // Duration calculations
+  const maxAvailableDuration = useMemo(() => {
+    if (mediaType === 'video' && videoDuration > 0) {
+      return videoDuration;
+    }
+    return dspResult?.durationSec ?? 16;
+  }, [mediaType, videoDuration, dspResult?.durationSec]);
+
+  const effectiveDuration = useMemo(() => {
+    const available = Math.max(0.5, maxAvailableDuration - trimStartSec);
+    if (customDuration !== null && customDuration > 0) {
+      return Math.max(0.5, Math.min(customDuration, available));
+    }
+    return available;
+  }, [maxAvailableDuration, trimStartSec, customDuration]);
+
   // Playback UI State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(0.48);
+  const [currentTime, setCurrentTime] = useState<number>(0);
   const [currentBassVal, setCurrentBassVal] = useState<number>(0);
   const [currentOnsetFlux, setCurrentOnsetFlux] = useState<number>(0);
 
@@ -104,9 +129,13 @@ export default function App() {
   const playStateRef = useRef({
     isPlaying: false,
     startedAtCtxTime: 0,
-    offsetSec: 0.48,
+    offsetSec: 0,
     durationSec: 16,
   });
+
+  useEffect(() => {
+    playStateRef.current.durationSec = effectiveDuration;
+  }, [effectiveDuration]);
 
   const paramsRef = useRef({
     style,
@@ -116,7 +145,10 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
+    mediaType,
+    trimStartSec,
   });
+
   paramsRef.current = {
     style,
     theme,
@@ -125,12 +157,15 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
+    mediaType,
+    trimStartSec,
   };
 
   const customImgUrlRef = useRef<string | null>(null);
 
   // 1. Load artwork image into HTMLImageElement
   useEffect(() => {
+    if (mediaType !== 'image') return;
     let cancelled = false;
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -143,18 +178,27 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [imageSrc]);
+  }, [imageSrc, mediaType]);
 
-  // 2. Rebuild preview RenderSurface when image, ratio, or fitMode changes
+  // 2. Rebuild preview RenderSurface when media, ratio, or fitMode changes
   useEffect(() => {
-    if (!loadedImage || !canvasRef.current) return;
+    if (!canvasRef.current) return;
     const { w, h } = getPreviewDimensions(ratio);
     canvasRef.current.width = w;
     canvasRef.current.height = h;
-    surfaceRef.current = createRenderSurface(loadedImage, w, h, fitMode);
-  }, [loadedImage, ratio, fitMode, activeTab]);
 
-  // 3. Helper to stop Web Audio playback cleanly
+    if (mediaType === 'video') {
+      if (loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
+        surfaceRef.current = createRenderSurface(loadedVideo, w, h, fitMode);
+      }
+    } else {
+      if (loadedImage) {
+        surfaceRef.current = createRenderSurface(loadedImage, w, h, fitMode);
+      }
+    }
+  }, [mediaType, loadedImage, loadedVideo, ratio, fitMode, activeTab]);
+
+  // 3. Helper to stop Web Audio & video playback cleanly
   const stopAudioSource = useCallback(() => {
     if (sourceNodeRef.current) {
       try {
@@ -166,7 +210,14 @@ export default function App() {
       }
       sourceNodeRef.current = null;
     }
-  }, []);
+    if (loadedVideo) {
+      try {
+        loadedVideo.pause();
+      } catch {
+        // Ignore video pause error
+      }
+    }
+  }, [loadedVideo]);
 
   // 4. Load deterministic Demo Bass Track on initial mount
   const loadDemoAudio = useCallback(() => {
@@ -174,8 +225,8 @@ export default function App() {
     setAudioBufferForRender(null);
     setIsPlaying(false);
     playStateRef.current.isPlaying = false;
-    playStateRef.current.offsetSec = 0.48;
-    setCurrentTime(0.48);
+    playStateRef.current.offsetSec = 0;
+    setCurrentTime(0);
     setAudioError(null);
     setIsAnalyzing(true);
 
@@ -183,7 +234,7 @@ export default function App() {
       const sr = 44100;
       const samples = generateDemoBassTrack(16, sr);
 
-      audioBufferRef.current = null; // Will be hydrated lazily on Play via AudioContext
+      audioBufferRef.current = null; // Hydrated lazily on Play via AudioContext
       setAudioSamples(samples);
       setAudioSampleRate(sr);
       setAudioName('Demo Bass Track (128 BPM · 16s)');
@@ -197,6 +248,7 @@ export default function App() {
     return () => {
       stopAudioSource();
       if (customImgUrlRef.current) URL.revokeObjectURL(customImgUrlRef.current);
+      if (customVideoUrlRef.current) URL.revokeObjectURL(customVideoUrlRef.current);
       if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
         audioCtxRef.current.close().catch(() => {});
       }
@@ -210,47 +262,75 @@ export default function App() {
     const timer = setTimeout(() => {
       const result = analyzeAudioSamples(audioSamples, audioSampleRate, fps, 64);
       setDspResult(result);
-      playStateRef.current.durationSec = result.durationSec;
       setIsAnalyzing(false);
     }, 10);
     return () => clearTimeout(timer);
   }, [audioSamples, audioSampleRate, fps]);
 
   // 6. Render a single frame for a given playback time
-  const drawFrameAtTime = useCallback((timeSec: number) => {
-    const canvas = canvasRef.current;
-    const surface = surfaceRef.current;
-    const {
-      dspResult: dsp,
-      style: s,
-      theme: t,
-      colorMix: cMix,
-      bassIntensity: bInt,
-      waveformLayout: wfLayout,
-    } = paramsRef.current;
-    if (!canvas || !surface || !dsp) return { bassVal: 0, onsetFlux: 0 };
+  const drawFrameAtTime = useCallback(
+    (timeSec: number) => {
+      const canvas = canvasRef.current;
+      const surface = surfaceRef.current;
+      const {
+        dspResult: dsp,
+        style: s,
+        theme: t,
+        colorMix: cMix,
+        bassIntensity: bInt,
+        waveformLayout: wfLayout,
+        mediaType: mType,
+        trimStartSec: tStart,
+      } = paramsRef.current;
+      if (!canvas || !surface || !dsp) return { bassVal: 0, onsetFlux: 0 };
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return { bassVal: 0, onsetFlux: 0 };
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return { bassVal: 0, onsetFlux: 0 };
 
-    const specCol = new Float32Array(64);
-    const { bassVal, onsetFlux, exactFrame } = sampleDspAtTime(dsp, timeSec, specCol);
+      // Update background frame if video is active
+      if (mType === 'video' && loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
+        const targetVideoTime = Math.max(0, tStart + timeSec);
+        if (
+          Math.abs(loadedVideo.currentTime - targetVideoTime) > 0.08 ||
+          !playStateRef.current.isPlaying
+        ) {
+          try {
+            loadedVideo.currentTime = targetVideoTime;
+          } catch {
+            // ignore seek errors
+          }
+        }
+        updateRenderSurfaceBase(
+          surface,
+          loadedVideo,
+          loadedVideo.videoWidth,
+          loadedVideo.videoHeight,
+          fitMode
+        );
+      }
 
-    renderStudioFrame(
-      ctx,
-      surface,
-      specCol,
-      bassVal,
-      s,
-      t,
-      bInt,
-      exactFrame,
-      wfLayout,
-      onsetFlux,
-      cMix
-    );
-    return { bassVal, onsetFlux };
-  }, []);
+      // Sample audio DSP at matching time
+      const audioTime = isDemoAudio ? timeSec % (dsp.durationSec || 16) : timeSec;
+      const specCol = new Float32Array(64);
+      const { bassVal, onsetFlux, exactFrame } = sampleDspAtTime(dsp, audioTime, specCol);
+
+      renderStudioFrame(
+        ctx,
+        surface,
+        specCol,
+        bassVal,
+        s,
+        t,
+        bInt,
+        exactFrame,
+        wfLayout,
+        onsetFlux,
+        cMix
+      );
+      return { bassVal, onsetFlux };
+    },
+    [fitMode, isDemoAudio, loadedVideo]
+  );
 
   // Re-draw static preview immediately whenever parameters, surface, or seek time change while paused
   useEffect(() => {
@@ -260,7 +340,9 @@ export default function App() {
     setCurrentOnsetFlux(onsetFlux);
   }, [
     activeTab,
+    mediaType,
     loadedImage,
+    loadedVideo,
     ratio,
     fitMode,
     style,
@@ -271,6 +353,7 @@ export default function App() {
     waveformLayout,
     dspResult,
     currentTime,
+    trimStartSec,
     drawFrameAtTime,
   ]);
 
@@ -309,7 +392,7 @@ export default function App() {
 
       const { bassVal, onsetFlux } = drawFrameAtTime(elapsed);
 
-      if (now - lastUiSync > 70) {
+      if (now - lastUiSync > 60) {
         lastUiSync = now;
         setCurrentTime(elapsed);
         setCurrentBassVal(bassVal);
@@ -327,7 +410,9 @@ export default function App() {
   const ensureAudioReady = useCallback(async () => {
     if (!audioSamples) return null;
     if (!audioCtxRef.current) {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       audioCtxRef.current = new Ctx();
       gainNodeRef.current = audioCtxRef.current.createGain();
       gainNodeRef.current.gain.value = isMuted ? 0 : 1;
@@ -359,23 +444,33 @@ export default function App() {
       if (ctx && audioBufferRef.current && gainNodeRef.current) {
         const src = ctx.createBufferSource();
         src.buffer = audioBufferRef.current;
+        src.loop = isDemoAudio;
         src.connect(gainNodeRef.current);
         const clamped = Math.max(
           0,
           Math.min(offsetSec, Math.max(0, audioBufferRef.current.duration - 0.05))
         );
-        src.start(0, clamped);
+        src.start(0, isDemoAudio ? offsetSec % audioBufferRef.current.duration : clamped);
         sourceNodeRef.current = src;
         playStateRef.current.startedAtCtxTime = ctx.currentTime;
-        playStateRef.current.offsetSec = clamped;
+        playStateRef.current.offsetSec = offsetSec;
       } else {
         playStateRef.current.offsetSec = offsetSec;
+      }
+
+      if (mediaType === 'video' && loadedVideo) {
+        try {
+          loadedVideo.currentTime = Math.max(0, trimStartSec + offsetSec);
+          loadedVideo.play().catch(() => {});
+        } catch {
+          // ignore play error
+        }
       }
 
       playStateRef.current.isPlaying = true;
       setIsPlaying(true);
     },
-    [ensureAudioReady, stopAudioSource]
+    [ensureAudioReady, isDemoAudio, loadedVideo, mediaType, stopAudioSource, trimStartSec]
   );
 
   const handleTogglePlay = useCallback(() => {
@@ -389,17 +484,17 @@ export default function App() {
       }
       stopAudioSource();
       playStateRef.current.isPlaying = false;
-      playStateRef.current.offsetSec = Math.min(currentPos, dspResult.durationSec);
+      playStateRef.current.offsetSec = Math.min(currentPos, effectiveDuration);
       setIsPlaying(false);
       setCurrentTime(playStateRef.current.offsetSec);
     } else {
       const startAt =
-        playStateRef.current.offsetSec >= dspResult.durationSec - 0.1
+        playStateRef.current.offsetSec >= effectiveDuration - 0.1
           ? 0
           : playStateRef.current.offsetSec;
       startPlaybackAt(startAt);
     }
-  }, [dspResult, startPlaybackAt, stopAudioSource]);
+  }, [dspResult, effectiveDuration, startPlaybackAt, stopAudioSource]);
 
   const handleRestart = useCallback(() => {
     if (playStateRef.current.isPlaying) {
@@ -407,28 +502,30 @@ export default function App() {
     } else {
       playStateRef.current.offsetSec = 0;
       setCurrentTime(0);
+      if (loadedVideo) {
+        loadedVideo.currentTime = trimStartSec;
+      }
+      const { bassVal, onsetFlux } = drawFrameAtTime(0);
+      setCurrentBassVal(bassVal);
+      setCurrentOnsetFlux(onsetFlux);
     }
-  }, [startPlaybackAt]);
+  }, [drawFrameAtTime, loadedVideo, startPlaybackAt, trimStartSec]);
 
   const handleSeek = useCallback(
     (timeSec: number) => {
-      playStateRef.current.offsetSec = timeSec;
-      setCurrentTime(timeSec);
+      const clamped = Math.max(0, Math.min(timeSec, effectiveDuration));
+      playStateRef.current.offsetSec = clamped;
+      setCurrentTime(clamped);
       if (playStateRef.current.isPlaying) {
-        startPlaybackAt(timeSec);
+        startPlaybackAt(clamped);
+      } else {
+        const { bassVal, onsetFlux } = drawFrameAtTime(clamped);
+        setCurrentBassVal(bassVal);
+        setCurrentOnsetFlux(onsetFlux);
       }
     },
-    [startPlaybackAt]
+    [drawFrameAtTime, effectiveDuration, startPlaybackAt]
   );
-
-  const getPlaybackTime = useCallback(() => {
-    const state = playStateRef.current;
-    const elapsed =
-      state.isPlaying && audioCtxRef.current
-        ? audioCtxRef.current.currentTime - state.startedAtCtxTime
-        : 0;
-    return Math.min(state.durationSec, Math.max(0, state.offsetSec + elapsed));
-  }, []);
 
   const handleToggleMute = useCallback(() => {
     const next = !isMuted;
@@ -438,10 +535,17 @@ export default function App() {
     }
   }, [isMuted]);
 
-  // 9. Handle custom Image & Audio Uploads
+  // 9. Handle Artwork / Image / Video / Audio Uploads
   const handleSelectDemoArtwork = (id: string) => {
     const found = DEMO_ARTWORKS.find((a) => a.id === id);
     if (!found) return;
+    setMediaType('image');
+    if (loadedVideo) {
+      loadedVideo.pause();
+      setLoadedVideo(null);
+    }
+    setCustomDuration(null);
+    setTrimStartSec(0);
     setSelectedArtworkId(id);
     setCustomImageName(null);
     setImageSrc(found.src);
@@ -453,10 +557,81 @@ export default function App() {
     }
     const url = URL.createObjectURL(file);
     customImgUrlRef.current = url;
+    setMediaType('image');
+    if (loadedVideo) {
+      loadedVideo.pause();
+      setLoadedVideo(null);
+    }
+    setCustomDuration(null);
+    setTrimStartSec(0);
     setSelectedArtworkId('custom');
     setCustomImageName(file.name);
     setImageSrc(url);
   };
+
+  const handleUploadVideo = useCallback(
+    async (file: File) => {
+      stopAudioSource();
+      if (customVideoUrlRef.current) {
+        URL.revokeObjectURL(customVideoUrlRef.current);
+      }
+
+      const url = URL.createObjectURL(file);
+      customVideoUrlRef.current = url;
+
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.playsInline = true;
+      video.muted = true;
+      video.preload = 'auto';
+      video.src = url;
+
+      video.onloadedmetadata = async () => {
+        const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
+        setVideoDuration(dur);
+        setCustomDuration(dur); // Default duration follows actual video length!
+        setTrimStartSec(0);
+        setLoadedVideo(video);
+        setMediaType('video');
+        setSelectedArtworkId('custom-video');
+        setCustomImageName(file.name);
+
+        video.currentTime = 0;
+
+        // Try extracting audio track directly from the video file
+        try {
+          const Ctx =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          const decodeCtx = audioCtxRef.current || new Ctx({ sampleRate: 44100 });
+          if (!audioCtxRef.current) {
+            audioCtxRef.current = decodeCtx;
+            gainNodeRef.current = decodeCtx.createGain();
+            gainNodeRef.current.gain.value = isMuted ? 0 : 1;
+            gainNodeRef.current.connect(decodeCtx.destination);
+          }
+
+          const rawBytes = await file.arrayBuffer();
+          const decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
+          if (decodedBuffer && decodedBuffer.length > 0 && decodedBuffer.duration > 0) {
+            const mono = mixAudioBufferToMono(decodedBuffer);
+            audioBufferRef.current = decodedBuffer;
+            setAudioBufferForRender(decodedBuffer);
+            setAudioSamples(mono);
+            setAudioSampleRate(decodedBuffer.sampleRate);
+            setAudioName(`${file.name} (Audio)`);
+            setIsDemoAudio(false);
+          }
+        } catch {
+          // Keep current audio track if video lacks audio
+        }
+
+        setCurrentTime(0);
+        playStateRef.current.offsetSec = 0;
+      };
+    },
+    [isMuted, stopAudioSource]
+  );
 
   const handleUploadAudio = async (file: File) => {
     stopAudioSource();
@@ -472,7 +647,9 @@ export default function App() {
     setIsAnalyzing(true);
 
     try {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const decodeCtx = audioCtxRef.current || new Ctx({ sampleRate: 44100 });
       if (!audioCtxRef.current) {
         audioCtxRef.current = decodeCtx;
@@ -486,7 +663,7 @@ export default function App() {
         const rawBytes = await file.arrayBuffer();
         decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
       } catch {
-        // Fallback to server FFmpeg Universal Audio Pipeline when server is running
+        // Fallback to server Universal Audio Pipeline when server is running
         const form = new FormData();
         form.append('audio', file);
         const res = await fetch('/api/decode-audio', {
@@ -564,7 +741,12 @@ export default function App() {
         onSelectTab={setActiveTab}
         onOpenRenderModal={() => setIsRenderModalOpen(true)}
         isRendering={false}
-        canRender={!isAnalyzing && Boolean(loadedImage) && Boolean(audioSamples)}
+        canRender={
+          !isAnalyzing &&
+          ((mediaType === 'image' && Boolean(loadedImage)) ||
+            (mediaType === 'video' && Boolean(loadedVideo))) &&
+          Boolean(audioSamples)
+        }
       />
 
       <main
@@ -591,10 +773,10 @@ export default function App() {
                 isAnalyzing={isAnalyzing}
                 audioName={audioName}
                 currentTime={currentTime}
-                duration={dspResult?.durationSec ?? 16}
+                duration={effectiveDuration}
                 currentBassVal={currentBassVal}
                 currentOnsetFlux={currentOnsetFlux}
-                totalFrames={dspResult?.totalFrames ?? 0}
+                totalFrames={Math.max(1, Math.round(effectiveDuration * fps))}
                 peakBassFrames={dspResult?.peakBassFrames ?? 0}
                 onTogglePlay={handleTogglePlay}
                 onRestart={handleRestart}
@@ -619,8 +801,15 @@ export default function App() {
                 fps={fps}
                 waveformLayout={waveformLayout}
                 audioError={audioError}
+                mediaType={mediaType}
+                videoDuration={videoDuration}
+                customDuration={customDuration}
+                trimStartSec={trimStartSec}
                 onSelectDemoArtwork={handleSelectDemoArtwork}
                 onUploadImage={handleUploadImage}
+                onUploadVideo={handleUploadVideo}
+                onChangeCustomDuration={setCustomDuration}
+                onChangeTrimStartSec={setTrimStartSec}
                 onUseDemoAudio={loadDemoAudio}
                 onUploadAudio={handleUploadAudio}
                 onChangeRatio={setRatio}
@@ -650,7 +839,11 @@ export default function App() {
       <RenderExportModal
         isOpen={isRenderModalOpen}
         onClose={() => setIsRenderModalOpen(false)}
+        mediaType={mediaType}
         imageEl={loadedImage}
+        videoEl={loadedVideo}
+        renderDuration={effectiveDuration}
+        trimStartSec={trimStartSec}
         audioSamples={audioSamples}
         audioBuffer={audioBufferForRender}
         audioSampleRate={audioSampleRate}

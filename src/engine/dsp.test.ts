@@ -13,10 +13,13 @@ import {
   COLOR_THEMES,
   WAVEFORM_STYLES,
   clampWaveformLayout,
+  formatTime,
   getDefaultWaveformLayout,
   getThemeColorMix,
   hexToRgb,
   rgbToHex,
+  SUPPORTED_MEDIA_EXTENSIONS,
+  SUPPORTED_VIDEO_EXTENSIONS,
 } from './presets';
 import {
   generateCloudRenderYaml,
@@ -225,4 +228,18 @@ test('Code templates inject studio defaults and 15 styles cleanly into cloud_ren
   assert.match(yml, /default: '0\.75'/);
   assert.match(yml, /\.opus/);
   assert.match(yml, /\.aiff/);
+});
+
+test('Video support defines extensions and formatTime formats correctly', () => {
+  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.mp4'));
+  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.webm'));
+  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.mov'));
+  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.mp4'));
+  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.jpg'));
+  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.png'));
+
+  assert.equal(formatTime(0), '00:00');
+  assert.equal(formatTime(15), '00:15');
+  assert.equal(formatTime(75), '01:15');
+  assert.equal(formatTime(3665), '61:05');
 });

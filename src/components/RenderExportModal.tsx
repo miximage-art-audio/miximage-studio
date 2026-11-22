@@ -15,13 +15,22 @@ import {
   WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
+  formatTime,
 } from '../engine/presets';
-import { createRenderSurface, renderStudioFrame } from '../engine/renderer';
+import {
+  createRenderSurface,
+  renderStudioFrame,
+  updateRenderSurfaceBase,
+} from '../engine/renderer';
 
 interface RenderExportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  mediaType: 'image' | 'video';
   imageEl: HTMLImageElement | null;
+  videoEl: HTMLVideoElement | null;
+  renderDuration: number;
+  trimStartSec: number;
   audioSamples: Float32Array | null;
   audioBuffer: AudioBuffer | null;
   audioSampleRate: number;
@@ -203,7 +212,11 @@ async function resolveH264EncoderConfig(
 export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   isOpen,
   onClose,
+  mediaType,
   imageEl,
+  videoEl,
+  renderDuration,
+  trimStartSec,
   audioSamples,
   audioBuffer,
   audioSampleRate,
@@ -250,8 +263,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   };
 
   const handleStartRender = async () => {
-    if (!imageEl || !audioSamples) {
-      setErrorMsg('กรุณาเลือกรูปภาพและไฟล์เสียงก่อนเริ่มเรนเดอร์');
+    const hasVisualSource = mediaType === 'video' ? Boolean(videoEl) : Boolean(imageEl);
+    if (!hasVisualSource || !audioSamples) {
+      setErrorMsg('กรุณาเลือกรูปภาพ/วิดีโอและไฟล์เสียงก่อนเริ่มเรนเดอร์');
       setStatus('error');
       return;
     }
@@ -297,7 +311,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           ? cachedDsp
           : analyzeAudioSamples(audioSamples, audioSampleRate, fps, 64);
 
-      const totalFrames = Math.max(1, Math.ceil(finalAudioBuffer.duration * fps));
+      const renderSec = renderDuration > 0 ? renderDuration : finalAudioBuffer.duration;
+      const totalFrames = Math.max(1, Math.ceil(renderSec * fps));
 
       const target = new ArrayBufferTarget();
       const muxer = new Muxer({
@@ -338,7 +353,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       setStatusText(`กำลังเข้ารหัสเสียง ${audioLabel}...`);
       const numChannels = finalAudioBuffer.numberOfChannels;
       const sr = finalAudioBuffer.sampleRate;
-      const totalSamples = finalAudioBuffer.length;
+      const startSample = Math.max(0, Math.min(finalAudioBuffer.length, Math.floor(trimStartSec * sr)));
+      const maxAudioSamples = Math.floor(renderSec * sr);
+      const totalSamples = Math.min(maxAudioSamples, finalAudioBuffer.length - startSample);
       const chunkSize = 4096;
       const channelDatas: Float32Array[] = [];
       for (let ch = 0; ch < numChannels; ch++) {
@@ -350,10 +367,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         if (cancelRequestedRef.current) throw new Error('ยกเลิกการเรนเดอร์แล้ว');
 
         const framesInChunk = Math.min(chunkSize, totalSamples - offset);
+        const sampleOffset = startSample + offset;
         const planar = new Float32Array(framesInChunk * numChannels);
         for (let ch = 0; ch < numChannels; ch++) {
           planar.set(
-            channelDatas[ch].subarray(offset, offset + framesInChunk),
+            channelDatas[ch].subarray(sampleOffset, sampleOffset + framesInChunk),
             ch * framesInChunk
           );
         }
@@ -378,7 +396,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       setProgressPct(5);
 
       // 2. Offline frame-by-frame Canvas -> VideoFrame -> VideoEncoder loop
-      const surface = createRenderSurface(imageEl, outW, outH, fitMode);
+      const source = mediaType === 'video' ? videoEl! : imageEl!;
+      const surface = createRenderSurface(source, outW, outH, fitMode);
       const renderCanvas = document.createElement('canvas');
       renderCanvas.width = outW;
       renderCanvas.height = outH;
@@ -394,7 +413,38 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         if (cancelRequestedRef.current) throw new Error('ยกเลิกการเรนเดอร์แล้ว');
 
         const t = frameIdx / fps;
-        const { bassVal, onsetFlux } = sampleDspAtTime(dsp, t, specCol);
+
+        if (mediaType === 'video' && videoEl) {
+          const videoTime = Math.min(
+            videoEl.duration || 0,
+            trimStartSec + t
+          );
+          if (Math.abs(videoEl.currentTime - videoTime) > 0.005) {
+            await new Promise<void>((resolve) => {
+              let tid: any;
+              const onSeeked = () => {
+                clearTimeout(tid);
+                videoEl.removeEventListener('seeked', onSeeked);
+                resolve();
+              };
+              videoEl.addEventListener('seeked', onSeeked);
+              videoEl.currentTime = videoTime;
+              tid = setTimeout(() => {
+                videoEl.removeEventListener('seeked', onSeeked);
+                resolve();
+              }, 300);
+            });
+          }
+          updateRenderSurfaceBase(
+            surface,
+            videoEl,
+            videoEl.videoWidth || outW,
+            videoEl.videoHeight || outH,
+            fitMode
+          );
+        }
+
+        const { bassVal, onsetFlux } = sampleDspAtTime(dsp, trimStartSec + t, specCol);
 
         renderStudioFrame(
           renderCtx,
@@ -525,6 +575,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           </div>
 
           <div className="bg-[#090D16] border border-slate-800 rounded-lg p-3.5 text-xs text-slate-300 flex flex-wrap gap-x-4 gap-y-1.5 font-mono tabular-nums">
+            <span>สื่อ: {mediaType === 'video' ? 'วิดีโอพื้นหลัง' : 'ภาพนิ่ง'}</span>
+            <span>ความยาว: {formatTime(renderDuration > 0 ? renderDuration : (cachedDsp?.durationSec ?? 16))}</span>
+            {trimStartSec > 0 && (
+              <span>ช่วง: {formatTime(trimStartSec)} - {formatTime(trimStartSec + (renderDuration > 0 ? renderDuration : 0))}</span>
+            )}
             <span>อัตราส่วน: {ratio}</span>
             <span>ขนาด: {outW}×{outH} px (1080p)</span>
             <span>FPS: {fps}</span>

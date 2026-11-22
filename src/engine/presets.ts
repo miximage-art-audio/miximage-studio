@@ -313,6 +313,13 @@ export const BASS_INTENSITY_PRESETS = [
   { value: 2.0, label: '2.0x โหด' },
 ];
 
+export function formatTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '00:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export const SUPPORTED_AUDIO_EXTENSIONS = [
   '.mp3',
   '.wav',
@@ -331,6 +338,20 @@ export const SUPPORTED_IMAGE_EXTENSIONS = [
   '.png',
   '.webp',
   '.bmp',
+];
+
+export const SUPPORTED_VIDEO_EXTENSIONS = [
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.mkv',
+  '.m4v',
+  '.avi',
+];
+
+export const SUPPORTED_MEDIA_EXTENSIONS = [
+  ...SUPPORTED_IMAGE_EXTENSIONS,
+  ...SUPPORTED_VIDEO_EXTENSIONS,
 ];
 
 export interface DemoArtwork {

@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ImagePlus, Music2, RotateCcw, Upload } from 'lucide-react';
+import { Film, ImagePlus, Music2, RotateCcw, Upload } from 'lucide-react';
 import {
   ASPECT_RATIOS,
   AspectRatioKey,
@@ -11,11 +11,13 @@ import {
   FpsOption,
   SUPPORTED_AUDIO_EXTENSIONS,
   SUPPORTED_IMAGE_EXTENSIONS,
+  SUPPORTED_VIDEO_EXTENSIONS,
   WAVEFORM_STYLES,
   WaveformColorMix,
   WaveformLayoutConfig,
   WaveformStyle,
   clampWaveformLayout,
+  formatTime,
   getThemeColorMix,
 } from '../engine/presets';
 import { DEMO_ARTWORKS } from '../engine/demoArtworks';
@@ -23,6 +25,10 @@ import { DEMO_ARTWORKS } from '../engine/demoArtworks';
 interface ControlRailProps {
   selectedArtworkId: string;
   customImageName: string | null;
+  mediaType: 'image' | 'video';
+  videoDuration: number;
+  customDuration: number | null;
+  trimStartSec: number;
   audioName: string;
   isDemoAudio: boolean;
   ratio: AspectRatioKey;
@@ -36,6 +42,9 @@ interface ControlRailProps {
   audioError: string | null;
   onSelectDemoArtwork: (id: string) => void;
   onUploadImage: (file: File) => void;
+  onUploadVideo: (file: File) => void;
+  onChangeCustomDuration: (dur: number | null) => void;
+  onChangeTrimStartSec: (start: number) => void;
   onUseDemoAudio: () => void;
   onUploadAudio: (file: File) => void;
   onChangeRatio: (ratio: AspectRatioKey) => void;
@@ -53,6 +62,10 @@ interface ControlRailProps {
 export const ControlRail: React.FC<ControlRailProps> = ({
   selectedArtworkId,
   customImageName,
+  mediaType,
+  videoDuration,
+  customDuration,
+  trimStartSec,
   audioName,
   isDemoAudio,
   ratio,
@@ -66,6 +79,9 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   audioError,
   onSelectDemoArtwork,
   onUploadImage,
+  onUploadVideo,
+  onChangeCustomDuration,
+  onChangeTrimStartSec,
   onUseDemoAudio,
   onUploadAudio,
   onChangeRatio,
@@ -80,11 +96,14 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   children,
 }) => {
   const imgInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
 
   const updateLayout = (patch: Partial<WaveformLayoutConfig>) => {
     onChangeWaveformLayout(clampWaveformLayout({ ...waveformLayout, ...patch }));
   };
+
+  const activeDuration = customDuration ?? videoDuration;
 
   return (
     <aside
@@ -95,16 +114,26 @@ export const ControlRail: React.FC<ControlRailProps> = ({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
-            1. สื่อต้นฉบับ (ภาพและเสียง)
+            1. สื่อต้นฉบับ (ภาพ/วิดีโอ และเสียง)
           </h2>
-          <button
-            type="button"
-            onClick={() => imgInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-0.5"
-          >
-            <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>อัปโหลดรูปภาพ</span>
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => imgInputRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-0.5"
+            >
+              <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>ภาพ</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => videoInputRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded px-1.5 py-0.5"
+            >
+              <Film className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>วิดีโอ</span>
+            </button>
+          </div>
           <input
             ref={imgInputRef}
             type="file"
@@ -117,11 +146,23 @@ export const ControlRail: React.FC<ControlRailProps> = ({
               e.target.value = '';
             }}
           />
+          <input
+            ref={videoInputRef}
+            type="file"
+            aria-label="อัปโหลดไฟล์วิดีโอ"
+            accept={SUPPORTED_VIDEO_EXTENSIONS.join(',')}
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onUploadVideo(f);
+              e.target.value = '';
+            }}
+          />
         </div>
 
         <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
           {DEMO_ARTWORKS.map((art) => {
-            const active = selectedArtworkId === art.id;
+            const active = mediaType === 'image' && selectedArtworkId === art.id;
             return (
               <button
                 key={art.id}
@@ -153,6 +194,118 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             );
           })}
         </div>
+
+        {/* Video Duration & Trim Controls */}
+        {mediaType === 'video' && videoDuration > 0 && (
+          <div className="bg-[#090D16] border border-emerald-500/40 rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                <Film className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>ความยาววิดีโอที่จะเรนเดอร์</span>
+              </div>
+              <span className="font-mono text-slate-300 font-semibold text-xs">
+                {formatTime(activeDuration)} / {formatTime(videoDuration)}
+              </span>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => onChangeCustomDuration(videoDuration)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                  activeDuration >= videoDuration - 0.1
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                เต็มไฟล์ ({formatTime(videoDuration)})
+              </button>
+              {videoDuration > 15 && (
+                <button
+                  type="button"
+                  onClick={() => onChangeCustomDuration(15)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                    Math.abs(activeDuration - 15) < 0.2
+                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  15 วิ (Shorts)
+                </button>
+              )}
+              {videoDuration > 30 && (
+                <button
+                  type="button"
+                  onClick={() => onChangeCustomDuration(30)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                    Math.abs(activeDuration - 30) < 0.2
+                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  30 วิ (Reels/TikTok)
+                </button>
+              )}
+              {videoDuration > 60 && (
+                <button
+                  type="button"
+                  onClick={() => onChangeCustomDuration(60)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                    Math.abs(activeDuration - 60) < 0.2
+                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  60 วิ (1 นาที)
+                </button>
+              )}
+            </div>
+
+            {/* Duration Slider */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>ปรับลดความยาว:</span>
+                <span className="font-mono text-emerald-300 font-medium">
+                  {activeDuration.toFixed(1)} วินาที
+                </span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={Math.max(1, videoDuration)}
+                step={0.5}
+                value={activeDuration}
+                onChange={(e) => onChangeCustomDuration(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+              />
+            </div>
+
+            {/* Trim Start Offset (if video is reduced) */}
+            {activeDuration < videoDuration - 0.5 && (
+              <div className="flex flex-col gap-1 pt-1.5 border-t border-slate-800/80">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>เริ่มเล่นจากวินาทีที่:</span>
+                  <span className="font-mono text-slate-300">
+                    {formatTime(trimStartSec)} ({trimStartSec.toFixed(1)}s)
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, videoDuration - activeDuration)}
+                  step={0.5}
+                  value={trimStartSec}
+                  onChange={(e) => onChangeTrimStartSec(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                  <span>ช่วงที่ตัด: {formatTime(trimStartSec)} - {formatTime(trimStartSec + activeDuration)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <button
@@ -191,11 +344,11 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
         <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
           <p className="truncate">
-            เสียงปัจจุบัน: <span className="text-slate-200">{audioName}</span>
+            เสียง: <span className="text-slate-200">{audioName}</span>
           </p>
           {customImageName && (
             <p className="text-sky-300 truncate shrink-0 max-w-[180px]">
-              ภาพ: {customImageName}
+              {mediaType === 'video' ? 'วิดีโอ:' : 'ภาพ:'} {customImageName}
             </p>
           )}
         </div>
