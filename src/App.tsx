@@ -133,6 +133,7 @@ export default function App() {
   const playStateRef = useRef({
     isPlaying: false,
     startedAtCtxTime: 0,
+    startedAtPerfTime: 0,
     offsetSec: 0,
     durationSec: 16,
   });
@@ -298,16 +299,32 @@ export default function App() {
       if (mType === 'video' && loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
         const vDur = loadedVideo.duration || videoDuration || 1;
         const targetVideoTime = vDur > 0 ? (tStart + timeSec) % vDur : 0;
-        if (
-          Math.abs(loadedVideo.currentTime - targetVideoTime) > 0.08 ||
-          !playStateRef.current.isPlaying
-        ) {
-          try {
-            loadedVideo.currentTime = targetVideoTime;
-          } catch {
-            // ignore seek errors
+
+        if (playStateRef.current.isPlaying) {
+          // While playing, make sure the video is actively playing smoothly without constantly seeking
+          if (loadedVideo.paused) {
+            loadedVideo.play().catch(() => {});
+          }
+          // Only re-sync if drift is large (> 1.2s) and not near the loop wrap
+          const drift = Math.abs(loadedVideo.currentTime - targetVideoTime);
+          if (drift > 1.2 && drift < vDur - 0.4) {
+            try {
+              loadedVideo.currentTime = targetVideoTime;
+            } catch {
+              // ignore seek errors
+            }
+          }
+        } else {
+          // While paused, seek immediately when scrubbing
+          if (Math.abs(loadedVideo.currentTime - targetVideoTime) > 0.04) {
+            try {
+              loadedVideo.currentTime = targetVideoTime;
+            } catch {
+              // ignore seek errors
+            }
           }
         }
+
         updateRenderSurfaceBase(
           surface,
           loadedVideo,
@@ -377,15 +394,21 @@ export default function App() {
       const state = playStateRef.current;
       if (!state.isPlaying) return;
 
-      let elapsed = state.offsetSec;
-      if (audioCtxRef.current && audioBufferRef.current) {
-        elapsed =
+      const wallElapsed =
+        state.offsetSec + (performance.now() - state.startedAtPerfTime) / 1000;
+      let elapsed = wallElapsed;
+
+      if (
+        audioCtxRef.current &&
+        audioCtxRef.current.state === 'running' &&
+        audioBufferRef.current
+      ) {
+        const audioElapsed =
           state.offsetSec +
           (audioCtxRef.current.currentTime - state.startedAtCtxTime);
-      } else {
-        // Fallback wall-clock progression if AudioContext unavailable
-        elapsed += 1 / 60;
-        state.offsetSec = elapsed;
+        if (audioElapsed >= 0 && Math.abs(audioElapsed - wallElapsed) < 0.8) {
+          elapsed = audioElapsed;
+        }
       }
 
       if (elapsed >= state.durationSec) {
@@ -451,7 +474,14 @@ export default function App() {
       const ctx = await ensureAudioReady();
       stopAudioSource();
 
+      const nowPerf = performance.now();
+      playStateRef.current.startedAtPerfTime = nowPerf;
+      playStateRef.current.offsetSec = offsetSec;
+
       if (ctx && audioBufferRef.current && gainNodeRef.current) {
+        if (ctx.state === 'suspended') {
+          await ctx.resume().catch(() => {});
+        }
         const src = ctx.createBufferSource();
         src.buffer = audioBufferRef.current;
         src.loop = isDemoAudio;
@@ -463,17 +493,22 @@ export default function App() {
         src.start(0, isDemoAudio ? offsetSec % audioBufferRef.current.duration : clamped);
         sourceNodeRef.current = src;
         playStateRef.current.startedAtCtxTime = ctx.currentTime;
-        playStateRef.current.offsetSec = offsetSec;
-      } else {
-        playStateRef.current.offsetSec = offsetSec;
       }
 
       if (mediaType === 'video' && loadedVideo) {
         try {
           loadedVideo.loop = true;
+          loadedVideo.muted = true;
           const vDur = loadedVideo.duration || 1;
-          loadedVideo.currentTime = vDur > 0 ? (trimStartSec + offsetSec) % vDur : 0;
-          loadedVideo.play().catch(() => {});
+          const startVTime = vDur > 0 ? (trimStartSec + offsetSec) % vDur : 0;
+          loadedVideo.currentTime = startVTime;
+          const playPromise = loadedVideo.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              loadedVideo.muted = true;
+              loadedVideo.play().catch(() => {});
+            });
+          }
         } catch {
           // ignore play error
         }
@@ -488,11 +523,17 @@ export default function App() {
   const handleTogglePlay = useCallback(() => {
     if (!dspResult) return;
     if (playStateRef.current.isPlaying) {
-      let currentPos = playStateRef.current.offsetSec;
-      if (audioCtxRef.current) {
-        currentPos =
+      const wallPos =
+        playStateRef.current.offsetSec +
+        (performance.now() - playStateRef.current.startedAtPerfTime) / 1000;
+      let currentPos = wallPos;
+      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+        const audioPos =
           playStateRef.current.offsetSec +
           (audioCtxRef.current.currentTime - playStateRef.current.startedAtCtxTime);
+        if (audioPos >= 0 && Math.abs(audioPos - wallPos) < 0.8) {
+          currentPos = audioPos;
+        }
       }
       stopAudioSource();
       playStateRef.current.isPlaying = false;
@@ -597,6 +638,7 @@ export default function App() {
       video.muted = true;
       video.preload = 'auto';
       video.src = url;
+      video.load();
 
       video.onloadedmetadata = async () => {
         const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
@@ -619,7 +661,7 @@ export default function App() {
           const Ctx =
             window.AudioContext ||
             (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-          const decodeCtx = audioCtxRef.current || new Ctx({ sampleRate: 44100 });
+          const decodeCtx = audioCtxRef.current || new Ctx();
           if (!audioCtxRef.current) {
             audioCtxRef.current = decodeCtx;
             gainNodeRef.current = decodeCtx.createGain();
@@ -646,7 +688,7 @@ export default function App() {
         playStateRef.current.offsetSec = 0;
       };
     },
-    [isMuted, stopAudioSource]
+    [isDemoAudio, isMuted, stopAudioSource]
   );
 
   const handleUploadAudio = async (file: File) => {
@@ -667,7 +709,7 @@ export default function App() {
       const Ctx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const decodeCtx = audioCtxRef.current || new Ctx({ sampleRate: 44100 });
+      const decodeCtx = audioCtxRef.current || new Ctx();
       if (!audioCtxRef.current) {
         audioCtxRef.current = decodeCtx;
         gainNodeRef.current = decodeCtx.createGain();
@@ -880,6 +922,28 @@ export default function App() {
         fps={fps}
         waveformLayout={waveformLayout}
       />
+
+      {/* Hidden container for active DOM-mounted video to guarantee browser hardware decode */}
+      {mediaType === 'video' && customVideoUrlRef.current && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            top: -9999,
+            left: -9999,
+            width: 1,
+            height: 1,
+            opacity: 0.001,
+            pointerEvents: 'none',
+            overflow: 'hidden',
+          }}
+          ref={(container) => {
+            if (container && loadedVideo && !container.contains(loadedVideo)) {
+              container.replaceChildren(loadedVideo);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

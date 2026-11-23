@@ -222,12 +222,16 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           const vDur = Number.isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : 0;
           if (vDur > 0) {
             const expectedVTime = (trimStartSec + sec) % vDur;
-            if (Math.abs(videoEl.currentTime - expectedVTime) > 0.3) {
+            const drift = Math.abs(videoEl.currentTime - expectedVTime);
+            if (drift > 1.2 && drift < vDur - 0.4) {
               try {
                 videoEl.currentTime = expectedVTime;
               } catch {
                 // ignore
               }
+            }
+            if (videoEl.paused) {
+              videoEl.play().catch(() => {});
             }
           }
           updateRenderSurfaceBase(surface, videoEl, videoEl.videoWidth, videoEl.videoHeight, fitMode);
@@ -350,6 +354,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
 
           if (mediaType === 'video' && videoEl) {
             try {
+              videoEl.muted = true;
               videoEl.loop = true;
               const vDur = videoEl.duration || 1;
               videoEl.currentTime = vDur > 0 ? trimStartSec % vDur : 0;
