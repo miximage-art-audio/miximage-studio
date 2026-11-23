@@ -31,6 +31,7 @@ export interface RenderExportModalProps {
   videoEl?: HTMLVideoElement | null;
   renderDuration?: number;
   songDuration?: number;
+  showWaveform?: boolean;
   trimStartSec?: number;
   audioSamples: Float32Array | null;
   audioBuffer: AudioBuffer | null;
@@ -68,6 +69,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   videoEl,
   renderDuration,
   songDuration,
+  showWaveform = true,
   trimStartSec = 0,
   audioSamples,
   audioBuffer,
@@ -245,7 +247,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           exactFrame,
           waveformLayout,
           onsetFlux,
-          colorMix
+          colorMix,
+          showWaveform
         );
       };
 
@@ -647,9 +650,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             <span>อัตราส่วน: {ratio}</span>
             <span>ขนาด: {outW}×{outH} px</span>
             <span>FPS: {fps}</span>
-            <span>คลื่น: {style}</span>
+            <span>คลื่น: {showWaveform ? style : 'ไม่ใส่ (ปิด)'}</span>
             <span>ความยาว: {formatTime(selectedDuration)}</span>
-            <span>เบส: {bassIntensity.toFixed(1)}x</span>
+            <span>เบส: {bassIntensity > 0 ? `${bassIntensity.toFixed(1)}x` : 'ไม่ใส่ (ปิดสั่น)'}</span>
           </div>
 
           {(isBusy || status === 'done') && (
@@ -676,7 +679,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               />
               <a
                 href={videoUrl}
-                download={`miximage_${ratio.replace(':', 'x')}_${style}_${fps}fps.${videoFormat.extension}`}
+                download={`miximage_${ratio.replace(':', 'x')}_${showWaveform ? style : 'no_wave'}_${fps}fps.${videoFormat.extension}`}
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-semibold transition-colors"
               >
                 <Download className="w-4 h-4" aria-hidden="true" />

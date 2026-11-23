@@ -17,6 +17,7 @@ interface StudioStageProps {
   ratio: AspectRatioKey;
   fitMode: FitMode;
   style: WaveformStyle;
+  showWaveform?: boolean;
   theme: ColorThemeKey;
   fps: FpsOption;
   bassIntensity: number;
@@ -50,6 +51,7 @@ export const StudioStage: React.FC<StudioStageProps> = ({
   ratio,
   fitMode,
   style,
+  showWaveform = true,
   theme,
   fps,
   bassIntensity,
@@ -245,16 +247,29 @@ export const StudioStage: React.FC<StudioStageProps> = ({
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-500 shrink-0">
-          ลากเมาส์หรือนิ้วบนภาพพรีวิวเพื่อย้ายตำแหน่งคลื่นเสียงได้ทันที · ขนาด{' '}
-          <span className="font-mono tabular-nums text-slate-400">
-            {waveformLayout.scale.toFixed(2)}x
-          </span>{' '}
-          · โปร่งใส{' '}
-          <span className="font-mono tabular-nums text-slate-400">
-            {Math.round(waveformLayout.opacity * 100)}%
-          </span>
-        </p>
+        {showWaveform === false ? (
+          <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded px-2.5 py-1 shrink-0 flex items-center justify-between">
+            <span>✕ ปิดคลื่นเสียงอยู่ (เน้นเฉพาะภาพพื้นหลัง/วิดีโอ)</span>
+            <span className="font-mono text-slate-400">
+              กระตุกตามเบส: {bassIntensity > 0 ? `${bassIntensity.toFixed(1)}x` : 'ปิดสั่น'}
+            </span>
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500 shrink-0">
+            ลากเมาส์หรือนิ้วบนภาพพรีวิวเพื่อย้ายตำแหน่งคลื่นเสียงได้ทันที · ขนาด{' '}
+            <span className="font-mono tabular-nums text-slate-400">
+              {waveformLayout.scale.toFixed(2)}x
+            </span>{' '}
+            · โปร่งใส{' '}
+            <span className="font-mono tabular-nums text-slate-400">
+              {Math.round(waveformLayout.opacity * 100)}%
+            </span>{' '}
+            · กระตุกเบส:{' '}
+            <span className="font-mono tabular-nums text-slate-400">
+              {bassIntensity > 0 ? `${bassIntensity.toFixed(1)}x` : 'ปิดสั่น'}
+            </span>
+          </p>
+        )}
       </div>
 
       {/* Transport & Real-Time DSP Telemetry Strip */}

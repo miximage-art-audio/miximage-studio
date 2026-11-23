@@ -223,7 +223,8 @@ export function renderStudioFrame(
   framePhase = 0,
   layout?: WaveformLayoutConfig,
   onsetFlux?: number,
-  customColors?: WaveformColorMix
+  customColors?: WaveformColorMix,
+  showWaveform = true
 ): void {
   const { width: w, height: h, baseCanvas, overlayCanvas, glowCanvas, workCanvas } = surface;
   const theme = COLOR_THEMES[themeKey] ?? COLOR_THEMES.cyberpunk;
@@ -270,7 +271,7 @@ export function renderStudioFrame(
   }
   targetCtx.restore();
 
-  if (wfLayout.opacity <= 0.001) {
+  if (!showWaveform || wfLayout.opacity <= 0.001) {
     return;
   }
 

@@ -78,6 +78,7 @@ export default function App() {
   const [ratio, setRatio] = useState<AspectRatioKey>('16:9');
   const [fitMode, setFitMode] = useState<FitMode>('cover');
   const [style, setStyle] = useState<WaveformStyle>('bars_3d');
+  const [showWaveform, setShowWaveform] = useState<boolean>(true);
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
   const [colorMix, setColorMix] = useState<WaveformColorMix>(() =>
     getThemeColorMix('cyberpunk')
@@ -150,6 +151,7 @@ export default function App() {
     waveformLayout,
     mediaType,
     trimStartSec,
+    showWaveform,
   });
 
   paramsRef.current = {
@@ -162,6 +164,7 @@ export default function App() {
     waveformLayout,
     mediaType,
     trimStartSec,
+    showWaveform,
   };
 
   const customImgUrlRef = useRef<string | null>(null);
@@ -284,6 +287,7 @@ export default function App() {
         waveformLayout: wfLayout,
         mediaType: mType,
         trimStartSec: tStart,
+        showWaveform: isWfVisible,
       } = paramsRef.current;
       if (!canvas || !surface || !dsp) return { bassVal: 0, onsetFlux: 0 };
 
@@ -329,7 +333,8 @@ export default function App() {
         exactFrame,
         wfLayout,
         onsetFlux,
-        cMix
+        cMix,
+        isWfVisible
       );
       return { bassVal, onsetFlux };
     },
@@ -350,6 +355,7 @@ export default function App() {
     ratio,
     fitMode,
     style,
+    showWaveform,
     theme,
     colorMix,
     bassIntensity,
@@ -775,6 +781,7 @@ export default function App() {
                 ratio={ratio}
                 fitMode={fitMode}
                 style={style}
+                showWaveform={showWaveform}
                 theme={theme}
                 fps={fps}
                 bassIntensity={bassIntensity}
@@ -807,6 +814,7 @@ export default function App() {
                 ratio={ratio}
                 fitMode={fitMode}
                 style={style}
+                showWaveform={showWaveform}
                 theme={theme}
                 colorMix={colorMix}
                 bassIntensity={bassIntensity}
@@ -827,6 +835,7 @@ export default function App() {
                 onChangeRatio={setRatio}
                 onChangeFitMode={setFitMode}
                 onChangeStyle={handleChangeStyle}
+                onChangeShowWaveform={setShowWaveform}
                 onChangeTheme={handleChangeTheme}
                 onChangeColorMix={setColorMix}
                 onChangeBassIntensity={setBassIntensity}
@@ -856,6 +865,7 @@ export default function App() {
         videoEl={loadedVideo}
         renderDuration={effectiveDuration}
         songDuration={songDuration}
+        showWaveform={showWaveform}
         trimStartSec={trimStartSec}
         audioSamples={audioSamples}
         audioBuffer={audioBufferForRender}

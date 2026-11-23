@@ -311,6 +311,42 @@ test('renderStudioFrame executes without errors across all 15 styles', () => {
       );
     }, `renderStudioFrame threw on style ${style.key}`);
   }
+
+  // Test toggle: showWaveform = false (skips waveform rendering completely)
+  assert.doesNotThrow(() => {
+    renderStudioFrame(
+      targetCanvas.getContext('2d') as any,
+      surface as any,
+      specCol,
+      0.8,
+      'bars_3d',
+      'cyberpunk',
+      1.0,
+      0,
+      getDefaultWaveformLayout('bars_3d'),
+      0.8,
+      undefined,
+      false // showWaveform = false
+    );
+  }, 'renderStudioFrame failed when showWaveform is false');
+
+  // Test toggle: bassIntensity = 0.0 (static background, no bounce or bloom)
+  assert.doesNotThrow(() => {
+    renderStudioFrame(
+      targetCanvas.getContext('2d') as any,
+      surface as any,
+      specCol,
+      0.9,
+      'bars_3d',
+      'cyberpunk',
+      0.0, // bassIntensity = 0.0 (no bounce)
+      0,
+      getDefaultWaveformLayout('bars_3d'),
+      0.9,
+      undefined,
+      true
+    );
+  }, 'renderStudioFrame failed when bassIntensity is 0.0');
 });
 
 test('duration resolution defaults to full song length and loops background video seamlessly', () => {

@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Film, ImagePlus, Music2, RotateCcw, Upload } from 'lucide-react';
+import { Activity, EyeOff, Film, ImagePlus, Music2, RotateCcw, Sliders, Sparkles, Upload } from 'lucide-react';
 import {
   ASPECT_RATIOS,
   AspectRatioKey,
@@ -35,6 +35,7 @@ interface ControlRailProps {
   ratio: AspectRatioKey;
   fitMode: FitMode;
   style: WaveformStyle;
+  showWaveform: boolean;
   theme: ColorThemeKey;
   colorMix: WaveformColorMix;
   bassIntensity: number;
@@ -51,6 +52,7 @@ interface ControlRailProps {
   onChangeRatio: (ratio: AspectRatioKey) => void;
   onChangeFitMode: (fit: FitMode) => void;
   onChangeStyle: (style: WaveformStyle) => void;
+  onChangeShowWaveform: (show: boolean) => void;
   onChangeTheme: (theme: ColorThemeKey) => void;
   onChangeColorMix: (next: WaveformColorMix) => void;
   onChangeBassIntensity: (val: number) => void;
@@ -73,6 +75,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   ratio,
   fitMode,
   style,
+  showWaveform,
   theme,
   colorMix,
   bassIntensity,
@@ -89,6 +92,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   onChangeRatio,
   onChangeFitMode,
   onChangeStyle,
+  onChangeShowWaveform,
   onChangeTheme,
   onChangeColorMix,
   onChangeBassIntensity,
@@ -100,6 +104,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   const imgInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const lastNonZeroBassRef = useRef<number>(bassIntensity > 0 ? bassIntensity : 1.0);
 
   const updateLayout = (patch: Partial<WaveformLayoutConfig>) => {
     onChangeWaveformLayout(clampWaveformLayout({ ...waveformLayout, ...patch }));
@@ -452,22 +457,63 @@ export const ControlRail: React.FC<ControlRailProps> = ({
       <hr className="border-slate-800/80" />
 
       {/* 3. Waveform Style (15 styles) & Color Theme */}
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
             3. รูปแบบคลื่นเสียง (15 แบบ) และโทนสี
           </h2>
-          <span className="text-[11px] font-mono text-slate-400">{style}</span>
+          <span className="text-[11px] font-mono text-slate-400">
+            {showWaveform ? style : 'ไม่ใส่คลื่นเสียง (ปิด)'}
+          </span>
         </div>
 
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
+        {/* Toggle UI ใส่ หรือ ไม่ใส่ คลื่นเสียง */}
+        <div className="grid grid-cols-2 p-1 bg-[#090D16] border border-slate-800 rounded-lg gap-1">
+          <button
+            type="button"
+            onClick={() => onChangeShowWaveform(true)}
+            aria-pressed={showWaveform}
+            className={`py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+              showWaveform
+                ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>✓ ใส่คลื่นเสียง (เปิด)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeShowWaveform(false)}
+            aria-pressed={!showWaveform}
+            className={`py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+              !showWaveform
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>✕ ไม่ใส่คลื่นเสียง (ปิด)</span>
+          </button>
+        </div>
+
+        {!showWaveform && (
+          <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded-lg p-2 leading-relaxed">
+            ℹ️ <strong>กำลังปิดคลื่นเสียง:</strong> วิดีโอจะเน้นเฉพาะภาพหรือวิดีโอพื้นหลัง (สามารถคลิกเลือกรูปแบบด้านล่างเพื่อเปิดใช้งานคลื่นเสียงได้ทันที)
+          </div>
+        )}
+
+        <div className={`grid grid-cols-3 sm:grid-cols-5 gap-1 transition-opacity ${!showWaveform ? 'opacity-50' : 'opacity-100'}`}>
           {WAVEFORM_STYLES.map((item) => {
-            const active = style === item.key;
+            const active = showWaveform && style === item.key;
             return (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => onChangeStyle(item.key)}
+                onClick={() => {
+                  onChangeShowWaveform(true);
+                  onChangeStyle(item.key);
+                }}
                 aria-pressed={active}
                 title={`${item.label} (${item.key}) — ${item.description}`}
                 className={`px-1.5 py-1.5 rounded-md border text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
@@ -698,6 +744,53 @@ export const ControlRail: React.FC<ControlRailProps> = ({
               onChange={(e) => updateLayout({ opacity: parseFloat(e.target.value) })}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
             />
+            {/* Quick Presets for Transparency / Opacity */}
+            <div className="flex items-center gap-1 mt-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => updateLayout({ opacity: 1.0 })}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  Math.abs(waveformLayout.opacity - 1.0) < 0.05
+                    ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                    : 'border-slate-800 bg-[#0D1320] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ทึบ 100%
+              </button>
+              <button
+                type="button"
+                onClick={() => updateLayout({ opacity: 0.7 })}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  Math.abs(waveformLayout.opacity - 0.7) < 0.05
+                    ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                    : 'border-slate-800 bg-[#0D1320] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ใส 70%
+              </button>
+              <button
+                type="button"
+                onClick={() => updateLayout({ opacity: 0.4 })}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  Math.abs(waveformLayout.opacity - 0.4) < 0.05
+                    ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                    : 'border-slate-800 bg-[#0D1320] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ใส 40%
+              </button>
+              <button
+                type="button"
+                onClick={() => updateLayout({ opacity: 0.0 })}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  waveformLayout.opacity <= 0.05
+                    ? 'border-rose-400 bg-rose-500/20 text-rose-200'
+                    : 'border-slate-800 bg-[#0D1320] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ใส 0% (ซ่อน)
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -714,31 +807,85 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             data-testid="bass-intensity-value"
             className="text-xs font-mono tabular-nums text-sky-300"
           >
-            {bassIntensity.toFixed(2)}x
+            {bassIntensity > 0 ? `${bassIntensity.toFixed(2)}x` : 'ไม่ใส่กระตุก (ปิด)'}
           </span>
         </div>
 
-        <div className="flex flex-col gap-0.5">
-          <label htmlFor="bass-intensity-slider" className="sr-only">
-            ปรับความแรงการกระตุกตามเบสแบบละเอียด
-          </label>
-          <input
-            id="bass-intensity-slider"
-            type="range"
-            min={0}
-            max={2}
-            step={0.05}
-            value={bassIntensity}
-            onChange={(e) => onChangeBassIntensity(parseFloat(e.target.value))}
-            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
-          />
-          <div className="flex justify-between text-[10px] font-mono text-slate-500">
-            <span>0.00x (นิ่ง)</span>
-            <span>0.25x (นุ่มนวล)</span>
-            <span>1.00x</span>
-            <span>2.00x (แรงสุด)</span>
-          </div>
+        {/* Toggle UI ใส่ หรือ ไม่ใส่ กระตุกตามเบส */}
+        <div className="grid grid-cols-2 p-1 bg-[#090D16] border border-slate-800 rounded-lg gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              if (bassIntensity === 0) {
+                onChangeBassIntensity(lastNonZeroBassRef.current || 1.0);
+              }
+            }}
+            aria-pressed={bassIntensity > 0}
+            className={`py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+              bassIntensity > 0
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>✓ ใส่กระตุกตามเบส (เปิด)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (bassIntensity > 0) {
+                lastNonZeroBassRef.current = bassIntensity;
+              }
+              onChangeBassIntensity(0.0);
+            }}
+            aria-pressed={bassIntensity === 0}
+            className={`py-1.5 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+              bassIntensity === 0
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>✕ ไม่ใส่กระตุก (ภาพนิ่ง 0.0x)</span>
+          </button>
         </div>
+
+        {bassIntensity === 0 ? (
+          <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded-lg p-2 leading-relaxed">
+            ℹ️ <strong>ปิดแรงกระตุกเบสอยู่:</strong> ภาพพื้นหลังจะอยู่นิ่งสนิท ไม่มีการซูมหรือสั่นไหวตามจังหวะเบส (สามารถคลิกเลือกปุ่มความแรงด้านล่างเพื่อเปิดใช้งานได้ทันที)
+          </div>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <label htmlFor="bass-intensity-slider">
+                ปรับความแรงการกระตุกตามเบส:
+              </label>
+              <span className="font-mono text-emerald-300 font-medium">
+                {bassIntensity.toFixed(2)}x
+              </span>
+            </div>
+            <input
+              id="bass-intensity-slider"
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={bassIntensity}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (val > 0) lastNonZeroBassRef.current = val;
+                onChangeBassIntensity(val);
+              }}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+            />
+            <div className="flex justify-between text-[10px] font-mono text-slate-500">
+              <span>0.00x (นิ่ง)</span>
+              <span>0.25x (นุ่มนวล)</span>
+              <span>1.00x (มาตรฐาน)</span>
+              <span>2.00x (แรงสุด)</span>
+            </div>
+          </div>
+        )}
 
         <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
           {BASS_INTENSITY_PRESETS.map((preset) => {
@@ -747,11 +894,14 @@ export const ControlRail: React.FC<ControlRailProps> = ({
               <button
                 key={preset.value}
                 type="button"
-                onClick={() => onChangeBassIntensity(preset.value)}
+                onClick={() => {
+                  if (preset.value > 0) lastNonZeroBassRef.current = preset.value;
+                  onChangeBassIntensity(preset.value);
+                }}
                 aria-pressed={active}
                 className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
-                    ? 'border-sky-400 bg-sky-500/15 text-sky-200'
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200 font-semibold shadow-sm'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
