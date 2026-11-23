@@ -234,35 +234,38 @@ export function renderStudioFrame(
   const c2 = customColors ? hexToRgb(customColors.c3, theme.c2Rgb) : theme.c2Rgb;
   const wfLayout = layout ?? getDefaultWaveformLayout(style);
 
-  // 1. Background Screen Bass-Sync Physics Engine (Onset Flux Zoom Punch + Kick Micro-Shake + Luminance Flash)
-  const punchVal = onsetFlux !== undefined ? onsetFlux : bassVal;
-  const zoom = 1.0 + punchVal * 0.12 * intensityMult;
-  const scaleFactor = Math.min(w, h) / 1080;
-  const shakePx = punchVal > 0.18 ? punchVal * 12 * intensityMult * scaleFactor : 0;
+  // 1. Background Screen Bass-Sync Engine (Smooth Velvety Breathing Zoom + Soft Ambient Bloom)
+  // Blend sub-bass weight with transient onset to get a cohesive, musical pulse (zero jerky camera shake)
+  const rawPunch = onsetFlux !== undefined
+    ? bassVal * 0.58 + onsetFlux * 0.42
+    : bassVal;
 
-  let dx = 0;
-  let dy = 0;
-  if (shakePx > 0.1) {
-    // Crisp dual-frequency screen shake triggered specifically on bass kick hits
-    dx = Math.sin(framePhase * 1.45) * shakePx * 0.75 + Math.cos(framePhase * 2.3) * shakePx * 0.25;
-    dy = Math.cos(framePhase * 1.65) * shakePx * 0.75 + Math.sin(framePhase * 2.1) * shakePx * 0.25;
-  }
+  // Smooth Hermite S-curve easing cushions the bounce and eliminates harsh step changes
+  const clampedPunch = Math.min(1.0, Math.max(0.0, rawPunch));
+  const smoothPunch = clampedPunch * clampedPunch * (3.0 - 2.0 * clampedPunch);
+
+  // Organic, cushioned breathing zoom: max ~4.8% at 1.0x intensity for a lush, fluid pump
+  const zoom = 1.0 + Math.pow(smoothPunch, 1.4) * 0.048 * intensityMult;
 
   targetCtx.save();
   targetCtx.fillStyle = '#090D16';
   targetCtx.fillRect(0, 0, w, h);
 
-  targetCtx.translate(w / 2 + dx, h / 2 + dy);
+  // Center-anchored zoom with zero jittery screen shake
+  targetCtx.translate(w / 2, h / 2);
   targetCtx.scale(zoom, zoom);
   targetCtx.translate(-w / 2, -h / 2);
 
   targetCtx.drawImage(baseCanvas, 0, 0, w, h);
 
-  if (punchVal > 0.15 && intensityMult > 0) {
-    const k = Math.min(0.45, (punchVal - 0.15) * 0.30 * intensityMult);
-    targetCtx.globalCompositeOperation = 'lighter';
-    targetCtx.globalAlpha = k;
-    targetCtx.drawImage(baseCanvas, 0, 0, w, h);
+  // Soft, continuous ambient bloom on heavy bass drops (quadratic falloff without harsh flashing cutoff)
+  if (smoothPunch > 0.10 && intensityMult > 0) {
+    const bloomAlpha = Math.min(0.22, Math.pow(smoothPunch, 2.2) * 0.28 * intensityMult);
+    if (bloomAlpha > 0.005) {
+      targetCtx.globalCompositeOperation = 'lighter';
+      targetCtx.globalAlpha = bloomAlpha;
+      targetCtx.drawImage(baseCanvas, 0, 0, w, h);
+    }
   }
   targetCtx.restore();
 

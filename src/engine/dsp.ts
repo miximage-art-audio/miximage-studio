@@ -278,10 +278,10 @@ export function analyzeAudioSamples(
     }
     bassEnvRaw[f] = Math.pow(Math.max(0, envPrev), 1.35);
   }
-  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.5);
+  const bassEnv = gaussianFilter1dRow(bassEnvRaw, 0.7);
 
-  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0 (crisp kick onset for screen punch)
-  const bassOnsetFlux = new Float32Array(totalFrames);
+  // Onset Flux: current frame bass energy minus moving average of previous 8 frames, clamped >= 0 (smooth kick onset for breathing pulse)
+  const bassOnsetFluxRaw = new Float32Array(totalFrames);
   for (let f = 0; f < totalFrames; f++) {
     const winStart = Math.max(0, f - 8);
     const count = f - winStart;
@@ -290,8 +290,9 @@ export function analyzeAudioSamples(
       sum += bassEnv[k];
     }
     const prevAvg = count > 0 ? sum / count : 0;
-    bassOnsetFlux[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
+    bassOnsetFluxRaw[f] = Math.min(1.0, Math.max(0, bassEnv[f] - prevAvg));
   }
+  const bassOnsetFlux = gaussianFilter1dRow(bassOnsetFluxRaw, 0.55);
 
   let peakBassFrames = 0;
   for (let f = 0; f < totalFrames; f++) {
