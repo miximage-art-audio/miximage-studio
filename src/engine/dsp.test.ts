@@ -21,6 +21,7 @@ import {
   SUPPORTED_MEDIA_EXTENSIONS,
   SUPPORTED_VIDEO_EXTENSIONS,
 } from './presets';
+import { renderStudioFrame } from './renderer';
 import {
   generateCloudRenderYaml,
   generateRenderEnginePy,
@@ -242,4 +243,72 @@ test('Video support defines extensions and formatTime formats correctly', () => 
   assert.equal(formatTime(15), '00:15');
   assert.equal(formatTime(75), '01:15');
   assert.equal(formatTime(3665), '61:05');
+});
+
+test('renderStudioFrame executes without errors across all 15 styles', () => {
+  const createMockCanvas = () => {
+    const ctx = {
+      save: () => {},
+      restore: () => {},
+      fillRect: () => {},
+      clearRect: () => {},
+      drawImage: () => {},
+      translate: () => {},
+      scale: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      quadraticCurveTo: () => {},
+      bezierCurveTo: () => {},
+      arc: () => {},
+      fill: () => {},
+      stroke: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      filter: 'none',
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      lineCap: 'round',
+      lineJoin: 'round',
+      shadowBlur: 0,
+      shadowColor: '',
+    };
+    return {
+      width: 1920,
+      height: 1080,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+  };
+
+  const targetCanvas = createMockCanvas();
+  const surface = {
+    width: 1920,
+    height: 1080,
+    baseCanvas: createMockCanvas(),
+    overlayCanvas: createMockCanvas(),
+    glowCanvas: createMockCanvas(),
+    workCanvas: createMockCanvas(),
+  };
+  const specCol = new Float32Array(64).fill(0.5);
+
+  for (const style of WAVEFORM_STYLES) {
+    assert.doesNotThrow(() => {
+      renderStudioFrame(
+        targetCanvas.getContext('2d') as any,
+        surface as any,
+        specCol,
+        0.5,
+        style.key,
+        'cyberpunk',
+        1.0,
+        0,
+        getDefaultWaveformLayout(style.key),
+        0.5
+      );
+    }, `renderStudioFrame threw on style ${style.key}`);
+  }
 });

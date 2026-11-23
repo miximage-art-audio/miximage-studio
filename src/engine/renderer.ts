@@ -233,6 +233,7 @@ export function renderStudioFrame(
     : (theme.cMidRgb ?? lerpColor(theme.c1Rgb, theme.c2Rgb, 0.5));
   const c2 = customColors ? hexToRgb(customColors.c3, theme.c2Rgb) : theme.c2Rgb;
   const wfLayout = layout ?? getDefaultWaveformLayout(style);
+  const scaleFactor = Math.min(w, h) / 1080;
 
   // 1. Background Screen Bass-Sync Engine (Smooth Velvety Breathing Zoom + Soft Ambient Bloom)
   // Blend sub-bass weight with transient onset to get a cohesive, musical pulse (zero jerky camera shake)
