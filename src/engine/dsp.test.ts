@@ -312,3 +312,39 @@ test('renderStudioFrame executes without errors across all 15 styles', () => {
     }, `renderStudioFrame threw on style ${style.key}`);
   }
 });
+
+test('duration resolution defaults to full song length and loops background video seamlessly', () => {
+  const songDuration = 215.5; // 3m 35s
+  const videoDuration = 10.0; // 10s short clip
+
+  // 1. App duration logic
+  const maxAvailableDuration = Math.max(songDuration, videoDuration);
+  assert.equal(maxAvailableDuration, 215.5);
+
+  // Default effective duration without custom cut is the full song
+  const customDuration: number | null = null;
+  const effectiveDuration =
+    customDuration !== null && customDuration > 0
+      ? Math.max(0.5, Math.min(customDuration, maxAvailableDuration))
+      : Math.max(0.5, songDuration);
+  assert.equal(effectiveDuration, 215.5);
+
+  // 2. Video modulo looping at arbitrary seconds into the song
+  const trimStartSec = 2.0;
+  const vDur = videoDuration;
+  const calcVTime = (sec: number) => (vDur > 0 ? (trimStartSec + sec) % vDur : 0);
+
+  assert.equal(calcVTime(0), 2.0);
+  assert.equal(calcVTime(8.0), 0.0); // 10 % 10 = 0
+  assert.equal(calcVTime(15.5), 7.5); // 17.5 % 10 = 7.5
+  assert.equal(calcVTime(215.5), 7.5); // (2 + 215.5) = 217.5 % 10 = 7.5
+
+  // 3. Custom duration preset clamping
+  const shortsDuration = 15.0;
+  const clampedShorts = Math.max(0.5, Math.min(shortsDuration, maxAvailableDuration));
+  assert.equal(clampedShorts, 15.0);
+
+  const overflowDuration = 999.0;
+  const clampedOverflow = Math.max(0.5, Math.min(overflowDuration, maxAvailableDuration));
+  assert.equal(clampedOverflow, 215.5);
+});

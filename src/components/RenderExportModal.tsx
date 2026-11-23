@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Download, Film, X } from 'lucide-react';
 import { DspAnalysisResult, analyzeAudioSamples, sampleDspAtTime } from '../engine/dsp';
 import {
@@ -30,6 +30,7 @@ export interface RenderExportModalProps {
   imageEl: HTMLImageElement | null;
   videoEl?: HTMLVideoElement | null;
   renderDuration?: number;
+  songDuration?: number;
   trimStartSec?: number;
   audioSamples: Float32Array | null;
   audioBuffer: AudioBuffer | null;
@@ -66,6 +67,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   imageEl,
   videoEl,
   renderDuration,
+  songDuration,
   trimStartSec = 0,
   audioSamples,
   audioBuffer,
@@ -91,6 +93,35 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const supportedFormat = getBrowserRecordingFormat();
   const captureStreamSupported =
     typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype;
+
+  const actualSongSec = useMemo(() => {
+    if (songDuration && songDuration > 0) return songDuration;
+    if (cachedDsp?.durationSec && cachedDsp.durationSec > 0) return cachedDsp.durationSec;
+    if (audioBuffer?.duration && audioBuffer.duration > 0) return audioBuffer.duration;
+    if (audioSamples && audioSampleRate > 0) return audioSamples.length / audioSampleRate;
+    return 16;
+  }, [songDuration, cachedDsp?.durationSec, audioBuffer?.duration, audioSamples, audioSampleRate]);
+
+  const vDuration = useMemo(() => {
+    if (mediaType === 'video' && videoEl && Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+      return videoEl.duration;
+    }
+    return 0;
+  }, [mediaType, videoEl]);
+
+  const masterMax = useMemo(() => {
+    return Math.max(actualSongSec, vDuration || actualSongSec);
+  }, [actualSongSec, vDuration]);
+
+  const [selectedDuration, setSelectedDuration] = useState<number>(() => {
+    return renderDuration && renderDuration > 0 ? renderDuration : actualSongSec;
+  });
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedDuration(renderDuration && renderDuration > 0 ? renderDuration : actualSongSec);
+    }
+  }, [isOpen, renderDuration, actualSongSec]);
 
   if (!isOpen) return null;
 
@@ -152,6 +183,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
     let source: AudioBufferSourceNode | null = null;
     let recordingStream: MediaStream | null = null;
     let animationFrameId = 0;
+    let intervalTimer: number | null = null;
 
     try {
       if (videoUrl) {
@@ -185,12 +217,15 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           videoEl.videoWidth > 0 &&
           videoEl.videoHeight > 0
         ) {
-          const vTime = Math.max(0, trimStartSec + sec);
-          if (Math.abs(videoEl.currentTime - vTime) > 0.08) {
-            try {
-              videoEl.currentTime = vTime;
-            } catch {
-              // ignore
+          const vDur = Number.isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : 0;
+          if (vDur > 0) {
+            const expectedVTime = (trimStartSec + sec) % vDur;
+            if (Math.abs(videoEl.currentTime - expectedVTime) > 0.3) {
+              try {
+                videoEl.currentTime = expectedVTime;
+              } catch {
+                // ignore
+              }
             }
           }
           updateRenderSurfaceBase(surface, videoEl, videoEl.videoWidth, videoEl.videoHeight, fitMode);
@@ -226,10 +261,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       if (!audioBuffer) exportAudioBuffer.getChannelData(0).set(audioSamples);
 
       const maxAudioDuration = exportAudioBuffer.duration;
-      const durationSec =
-        renderDuration !== undefined && renderDuration > 0
-          ? renderDuration
-          : Math.min(dsp.durationSec, maxAudioDuration);
+      const durationSec = selectedDuration > 0 ? selectedDuration : actualSongSec;
 
       if (!Number.isFinite(durationSec) || durationSec <= 0 || dsp.totalFrames <= 0) {
         throw new Error('ไฟล์เสียงไม่มีความยาวที่ใช้เรนเดอร์ได้');
@@ -238,7 +270,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       const audioDestination = audioContext.createMediaStreamDestination();
       source = audioContext.createBufferSource();
       source.buffer = exportAudioBuffer;
-      source.loop = maxAudioDuration < durationSec; // Loop audio if video is longer
+      source.loop = maxAudioDuration < durationSec; // Loop audio if duration is longer than song
       source.connect(audioDestination);
 
       recordingStream = new MediaStream([
@@ -257,6 +289,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       let lastProgressUpdate = 0;
 
       const stopRecorderIfActive = () => {
+        if (intervalTimer !== null) {
+          clearInterval(intervalTimer);
+          intervalTimer = null;
+        }
         if (recorder.state !== 'inactive') recorder.stop();
         if (mediaType === 'video' && videoEl) {
           try {
@@ -278,6 +314,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
         };
 
         recorder.onstop = () => {
+          if (intervalTimer !== null) {
+            clearInterval(intervalTimer);
+            intervalTimer = null;
+          }
           if (recorderError) {
             reject(recorderError);
             return;
@@ -307,7 +347,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
 
           if (mediaType === 'video' && videoEl) {
             try {
-              videoEl.currentTime = trimStartSec;
+              videoEl.loop = true;
+              const vDur = videoEl.duration || 1;
+              videoEl.currentTime = vDur > 0 ? trimStartSec % vDur : 0;
               videoEl.play().catch(() => {});
             } catch {
               // ignore
@@ -319,7 +361,17 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             stopRecorderIfActive();
           };
           source!.start(startedAt, 0, durationSec);
-          setStatusText(`กำลังบันทึกภาพและเสียงในเบราว์เซอร์ ${outW}×${outH} px...`);
+          setStatusText(`กำลังบันทึกภาพและเสียง ${outW}×${outH} px (${formatTime(durationSec)})...`);
+
+          // Secondary interval backup to ensure stop triggers accurately even if requestAnimationFrame throttles
+          intervalTimer = window.setInterval(() => {
+            if (recorder.state === 'inactive') return;
+            const elapsed = Math.max(0, audioContext!.currentTime - startedAt);
+            if (elapsed >= durationSec) {
+              drawFrameAt(durationSec);
+              stopRecorderIfActive();
+            }
+          }, 200);
 
           const tick = (now: number) => {
             if (recorder.state === 'inactive') return;
@@ -360,6 +412,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
       setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดระหว่างเรนเดอร์');
     } finally {
+      if (intervalTimer !== null) {
+        clearInterval(intervalTimer);
+        intervalTimer = null;
+      }
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       if (source) {
         source.onended = null;
@@ -406,8 +462,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               </h2>
               <p className="text-[11px] text-slate-400">
                 {mediaType === 'video'
-                  ? `วิดีโอพื้นหลัง (${formatTime(renderDuration || 16)})`
-                  : 'เรนเดอร์คลื่นเสียงเพลงความละเอียดสูงในเครื่องของคุณ'}
+                  ? `วิดีโอพื้นหลัง (${formatTime(selectedDuration)})`
+                  : `เรนเดอร์คลื่นเสียงเพลง (${formatTime(selectedDuration)})`}
               </p>
             </div>
           </div>
@@ -440,41 +496,148 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           </div>
 
           {status === 'idle' && (
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-300">
-                เลือกความละเอียดในการส่งออก
-              </span>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setResolutionScale('1080p')}
-                  aria-pressed={resolutionScale === '1080p'}
-                  className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
-                    resolutionScale === '1080p'
-                      ? 'border-sky-400 bg-sky-500/15 text-slate-50'
-                      : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="text-xs font-semibold">1080p Full HD (ต้นฉบับ)</div>
-                  <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                    {baseSpec.width} × {baseSpec.height} px
+            <div className="flex flex-col gap-3">
+              {/* Duration selection section */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-300">
+                    ความยาววิดีโอที่จะเรนเดอร์:
+                  </span>
+                  <span className="font-mono text-emerald-300 font-semibold text-xs">
+                    {formatTime(selectedDuration)} ({selectedDuration.toFixed(1)} วินาที)
+                  </span>
+                </div>
+
+                {/* Preset Chips */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDuration(actualSongSec)}
+                    className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                      Math.abs(selectedDuration - actualSongSec) < 0.2
+                        ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                        : 'border-slate-800 bg-slate-900 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    🎵 เต็มเพลง ({formatTime(actualSongSec)})
+                  </button>
+
+                  {vDuration > 0 && Math.abs(vDuration - actualSongSec) > 0.5 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDuration(vDuration)}
+                      className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                        Math.abs(selectedDuration - vDuration) < 0.2
+                          ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                          : 'border-slate-800 bg-slate-900 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      🎬 ตามคลิปวิดีโอ ({formatTime(vDuration)})
+                    </button>
+                  )}
+
+                  {masterMax >= 15 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDuration(15)}
+                      className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                        Math.abs(selectedDuration - 15) < 0.2
+                          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      15 วิ
+                    </button>
+                  )}
+
+                  {masterMax >= 30 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDuration(30)}
+                      className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                        Math.abs(selectedDuration - 30) < 0.2
+                          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      30 วิ
+                    </button>
+                  )}
+
+                  {masterMax >= 60 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDuration(60)}
+                      className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                        Math.abs(selectedDuration - 60) < 0.2
+                          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      60 วิ (1 นาที)
+                    </button>
+                  )}
+                </div>
+
+                {/* Duration Slider */}
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, masterMax)}
+                  step={0.5}
+                  value={selectedDuration}
+                  onChange={(e) => setSelectedDuration(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+                />
+
+                {/* Loop Notice if video is shorter than export duration */}
+                {mediaType === 'video' && vDuration > 0 && selectedDuration > vDuration + 0.5 && (
+                  <div className="text-[11px] text-sky-300 bg-sky-950/30 border border-sky-800/40 rounded px-2.5 py-1.5 flex items-center gap-1.5">
+                    <span>🔁</span>
+                    <span>
+                      วิดีโอพื้นหลัง ({formatTime(vDuration)}) จะวนลูปซ้ำอัตโนมัติตลอดความยาวที่เลือก ({formatTime(selectedDuration)})
+                    </span>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setResolutionScale('720p')}
-                  aria-pressed={resolutionScale === '720p'}
-                  className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
-                    resolutionScale === '720p'
-                      ? 'border-sky-400 bg-sky-500/15 text-slate-50'
-                      : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="text-xs font-semibold">720p Fast Render</div>
-                  <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                    เรนเดอร์เร็วขึ้น 2 เท่า
-                  </div>
-                </button>
+                )}
+              </div>
+
+              {/* Resolution selection */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-slate-800/80">
+                <span className="text-xs font-medium text-slate-300">
+                  เลือกความละเอียดในการส่งออก
+                </span>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setResolutionScale('1080p')}
+                    aria-pressed={resolutionScale === '1080p'}
+                    className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                      resolutionScale === '1080p'
+                        ? 'border-sky-400 bg-sky-500/15 text-slate-50'
+                        : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">1080p Full HD (ต้นฉบับ)</div>
+                    <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                      {baseSpec.width} × {baseSpec.height} px
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResolutionScale('720p')}
+                    aria-pressed={resolutionScale === '720p'}
+                    className={`px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                      resolutionScale === '720p'
+                        ? 'border-sky-400 bg-sky-500/15 text-slate-50'
+                        : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">720p Fast Render</div>
+                    <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                      เรนเดอร์เร็วขึ้น 2 เท่า
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -485,7 +648,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             <span>ขนาด: {outW}×{outH} px</span>
             <span>FPS: {fps}</span>
             <span>คลื่น: {style}</span>
-            <span>ความยาว: {formatTime(renderDuration || 16)}</span>
+            <span>ความยาว: {formatTime(selectedDuration)}</span>
             <span>เบส: {bassIntensity.toFixed(1)}x</span>
           </div>
 
@@ -531,25 +694,30 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             </p>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-1 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={handleClose}
-              disabled={isBusy}
-              className="px-4 py-2 rounded-lg border border-slate-700 hover:border-slate-500 text-xs font-medium text-slate-200 disabled:opacity-40 transition-colors"
-            >
-              ปิด
-            </button>
-            {(status === 'idle' || status === 'error') && (
+          <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
+            <span className="text-[11px] text-slate-500">
+              💡 แนะนำเปิดหน้านี้ทิ้งไว้ขณะเรนเดอร์
+            </span>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleStartRender}
-                disabled={!supportedFormat || !captureStreamSupported}
-                className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={handleClose}
+                disabled={isBusy}
+                className="px-4 py-2 rounded-lg border border-slate-700 hover:border-slate-500 text-xs font-medium text-slate-200 disabled:opacity-40 transition-colors"
               >
-                เริ่มเรนเดอร์วิดีโอ
+                ปิด
               </button>
-            )}
+              {(status === 'idle' || status === 'error') && (
+                <button
+                  type="button"
+                  onClick={handleStartRender}
+                  disabled={!supportedFormat || !captureStreamSupported}
+                  className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  เริ่มเรนเดอร์วิดีโอ ({formatTime(selectedDuration)})
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

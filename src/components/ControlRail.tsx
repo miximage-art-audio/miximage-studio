@@ -31,6 +31,7 @@ interface ControlRailProps {
   trimStartSec: number;
   audioName: string;
   isDemoAudio: boolean;
+  songDuration?: number;
   ratio: AspectRatioKey;
   fitMode: FitMode;
   style: WaveformStyle;
@@ -68,6 +69,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   trimStartSec,
   audioName,
   isDemoAudio,
+  songDuration = 16,
   ratio,
   fitMode,
   style,
@@ -103,7 +105,12 @@ export const ControlRail: React.FC<ControlRailProps> = ({
     onChangeWaveformLayout(clampWaveformLayout({ ...waveformLayout, ...patch }));
   };
 
-  const activeDuration = customDuration ?? videoDuration;
+  const targetSongDur = songDuration || 16;
+  const masterMax =
+    mediaType === 'video' && videoDuration > 0
+      ? Math.max(targetSongDur, videoDuration)
+      : targetSongDur;
+  const activeDuration = customDuration ?? targetSongDur;
 
   return (
     <aside
@@ -195,117 +202,134 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        {/* Video Duration & Trim Controls */}
-        {mediaType === 'video' && videoDuration > 0 && (
-          <div className="bg-[#090D16] border border-emerald-500/40 rounded-lg p-2.5 flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                <Film className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>ความยาววิดีโอที่จะเรนเดอร์</span>
-              </div>
-              <span className="font-mono text-slate-300 font-semibold text-xs">
-                {formatTime(activeDuration)} / {formatTime(videoDuration)}
-              </span>
+        {/* Video & Song Duration & Trim Controls */}
+        <div className="bg-[#090D16] border border-emerald-500/40 rounded-lg p-2.5 flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+              <Film className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>ความยาวคลิปที่จะเรนเดอร์</span>
             </div>
+            <span className="font-mono text-slate-300 font-semibold text-xs">
+              {formatTime(activeDuration)} / {formatTime(masterMax)}
+            </span>
+          </div>
 
-            {/* Quick Presets */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+          {mediaType === 'video' && videoDuration > 0 && videoDuration < activeDuration && (
+            <div className="text-[11px] text-emerald-300/90 bg-emerald-950/40 border border-emerald-800/40 px-2 py-1 rounded">
+              🔁 วิดีโอพื้นหลัง ({formatTime(videoDuration)}) จะวนลูปซ้ำอัตโนมัติตลอดความยาวเพลง ({formatTime(activeDuration)})
+            </div>
+          )}
+
+          {/* Quick Presets */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => onChangeCustomDuration(null)}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                customDuration === null || Math.abs(activeDuration - targetSongDur) < 0.2
+                  ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                  : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              เต็มเพลง ({formatTime(targetSongDur)})
+            </button>
+            {mediaType === 'video' && videoDuration > 0 && Math.abs(videoDuration - targetSongDur) > 0.5 && (
               <button
                 type="button"
                 onClick={() => onChangeCustomDuration(videoDuration)}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
-                  activeDuration >= videoDuration - 0.1
+                  customDuration !== null && Math.abs(activeDuration - videoDuration) < 0.2
                     ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
                     : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                เต็มไฟล์ ({formatTime(videoDuration)})
+                ตามวิดีโอ ({formatTime(videoDuration)})
               </button>
-              {videoDuration > 15 && (
-                <button
-                  type="button"
-                  onClick={() => onChangeCustomDuration(15)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
-                    Math.abs(activeDuration - 15) < 0.2
-                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  15 วิ (Shorts)
-                </button>
-              )}
-              {videoDuration > 30 && (
-                <button
-                  type="button"
-                  onClick={() => onChangeCustomDuration(30)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
-                    Math.abs(activeDuration - 30) < 0.2
-                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  30 วิ (Reels/TikTok)
-                </button>
-              )}
-              {videoDuration > 60 && (
-                <button
-                  type="button"
-                  onClick={() => onChangeCustomDuration(60)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
-                    Math.abs(activeDuration - 60) < 0.2
-                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  60 วิ (1 นาที)
-                </button>
-              )}
-            </div>
+            )}
+            {masterMax > 15 && (
+              <button
+                type="button"
+                onClick={() => onChangeCustomDuration(15)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                  Math.abs(activeDuration - 15) < 0.2
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                15 วิ (Shorts)
+              </button>
+            )}
+            {masterMax > 30 && (
+              <button
+                type="button"
+                onClick={() => onChangeCustomDuration(30)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                  Math.abs(activeDuration - 30) < 0.2
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                30 วิ (Reels/TikTok)
+              </button>
+            )}
+            {masterMax > 60 && (
+              <button
+                type="button"
+                onClick={() => onChangeCustomDuration(60)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                  Math.abs(activeDuration - 60) < 0.2
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                60 วิ (1 นาที)
+              </button>
+            )}
+          </div>
 
-            {/* Duration Slider */}
-            <div className="flex flex-col gap-1">
+          {/* Duration Slider */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>ปรับความยาวคลิป:</span>
+              <span className="font-mono text-emerald-300 font-medium">
+                {activeDuration.toFixed(1)} วินาที
+              </span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={Math.max(1, masterMax)}
+              step={0.5}
+              value={activeDuration}
+              onChange={(e) => onChangeCustomDuration(parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+            />
+          </div>
+
+          {/* Trim Start Offset (if video is active) */}
+          {mediaType === 'video' && videoDuration > 0 && activeDuration < videoDuration - 0.5 && (
+            <div className="flex flex-col gap-1 pt-1.5 border-t border-slate-800/80">
               <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span>ปรับลดความยาว:</span>
-                <span className="font-mono text-emerald-300 font-medium">
-                  {activeDuration.toFixed(1)} วินาที
+                <span>เริ่มเล่นจากวินาทีที่:</span>
+                <span className="font-mono text-slate-300">
+                  {formatTime(trimStartSec)} ({trimStartSec.toFixed(1)}s)
                 </span>
               </div>
               <input
                 type="range"
-                min={1}
-                max={Math.max(1, videoDuration)}
+                min={0}
+                max={Math.max(0, videoDuration - activeDuration)}
                 step={0.5}
-                value={activeDuration}
-                onChange={(e) => onChangeCustomDuration(parseFloat(e.target.value))}
+                value={trimStartSec}
+                onChange={(e) => onChangeTrimStartSec(parseFloat(e.target.value))}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
               />
-            </div>
-
-            {/* Trim Start Offset (if video is reduced) */}
-            {activeDuration < videoDuration - 0.5 && (
-              <div className="flex flex-col gap-1 pt-1.5 border-t border-slate-800/80">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span>เริ่มเล่นจากวินาทีที่:</span>
-                  <span className="font-mono text-slate-300">
-                    {formatTime(trimStartSec)} ({trimStartSec.toFixed(1)}s)
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, videoDuration - activeDuration)}
-                  step={0.5}
-                  value={trimStartSec}
-                  onChange={(e) => onChangeTrimStartSec(parseFloat(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
-                />
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                  <span>ช่วงที่ตัด: {formatTime(trimStartSec)} - {formatTime(trimStartSec + activeDuration)}</span>
-                </div>
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>ช่วงที่ตัด: {formatTime(trimStartSec)} - {formatTime(trimStartSec + activeDuration)}</span>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-2">
           <button

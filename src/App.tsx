@@ -95,21 +95,24 @@ export default function App() {
   const [audioBufferForRender, setAudioBufferForRender] = useState<AudioBuffer | null>(null);
   const [dspResult, setDspResult] = useState<DspAnalysisResult | null>(null);
 
-  // Duration calculations
+  // Duration calculations (Song/Audio is master by default, video loops if shorter)
+  const songDuration = useMemo(() => {
+    return dspResult?.durationSec ?? (audioSamples ? audioSamples.length / audioSampleRate : 16);
+  }, [dspResult?.durationSec, audioSamples, audioSampleRate]);
+
   const maxAvailableDuration = useMemo(() => {
     if (mediaType === 'video' && videoDuration > 0) {
-      return videoDuration;
+      return Math.max(songDuration, videoDuration);
     }
-    return dspResult?.durationSec ?? 16;
-  }, [mediaType, videoDuration, dspResult?.durationSec]);
+    return songDuration;
+  }, [mediaType, videoDuration, songDuration]);
 
   const effectiveDuration = useMemo(() => {
-    const available = Math.max(0.5, maxAvailableDuration - trimStartSec);
     if (customDuration !== null && customDuration > 0) {
-      return Math.max(0.5, Math.min(customDuration, available));
+      return Math.max(0.5, Math.min(customDuration, maxAvailableDuration));
     }
-    return available;
-  }, [maxAvailableDuration, trimStartSec, customDuration]);
+    return Math.max(0.5, songDuration);
+  }, [customDuration, maxAvailableDuration, songDuration]);
 
   // Playback UI State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -287,9 +290,10 @@ export default function App() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return { bassVal: 0, onsetFlux: 0 };
 
-      // Update background frame if video is active
+      // Update background frame if video is active (with seamless looping across long songs)
       if (mType === 'video' && loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
-        const targetVideoTime = Math.max(0, tStart + timeSec);
+        const vDur = loadedVideo.duration || videoDuration || 1;
+        const targetVideoTime = vDur > 0 ? (tStart + timeSec) % vDur : 0;
         if (
           Math.abs(loadedVideo.currentTime - targetVideoTime) > 0.08 ||
           !playStateRef.current.isPlaying
@@ -460,7 +464,9 @@ export default function App() {
 
       if (mediaType === 'video' && loadedVideo) {
         try {
-          loadedVideo.currentTime = Math.max(0, trimStartSec + offsetSec);
+          loadedVideo.loop = true;
+          const vDur = loadedVideo.duration || 1;
+          loadedVideo.currentTime = vDur > 0 ? (trimStartSec + offsetSec) % vDur : 0;
           loadedVideo.play().catch(() => {});
         } catch {
           // ignore play error
@@ -589,7 +595,11 @@ export default function App() {
       video.onloadedmetadata = async () => {
         const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
         setVideoDuration(dur);
-        setCustomDuration(dur); // Default duration follows actual video length!
+        if (isDemoAudio) {
+          setCustomDuration(dur);
+        } else {
+          setCustomDuration(null); // Keep full song length if song is already uploaded!
+        }
         setTrimStartSec(0);
         setLoadedVideo(video);
         setMediaType('video');
@@ -643,6 +653,7 @@ export default function App() {
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0;
     setCurrentTime(0);
+    setCustomDuration(null); // Always default to the full song length!
     setAudioError(null);
     setIsAnalyzing(true);
 
@@ -792,6 +803,7 @@ export default function App() {
                 customImageName={customImageName}
                 audioName={audioName}
                 isDemoAudio={isDemoAudio}
+                songDuration={songDuration}
                 ratio={ratio}
                 fitMode={fitMode}
                 style={style}
@@ -843,6 +855,7 @@ export default function App() {
         imageEl={loadedImage}
         videoEl={loadedVideo}
         renderDuration={effectiveDuration}
+        songDuration={songDuration}
         trimStartSec={trimStartSec}
         audioSamples={audioSamples}
         audioBuffer={audioBufferForRender}
