@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArchitectureGuideView } from './components/ArchitectureGuideView';
 import { CloudPipelineView } from './components/CloudPipelineView';
 import { ControlRail } from './components/ControlRail';
+import { PinLoginGate } from './components/PinLoginGate';
 import { RenderExportModal } from './components/RenderExportModal';
 import { StudioStage } from './components/StudioStage';
 import { TopBar, WorkspaceTab } from './components/TopBar';
@@ -51,7 +52,7 @@ function mixAudioBufferToMono(buffer: AudioBuffer): Float32Array {
   return mono;
 }
 
-export default function App() {
+function StudioWorkspace() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
   const [isRenderModalOpen, setIsRenderModalOpen] = useState(false);
 
@@ -727,4 +728,14 @@ export default function App() {
       />
     </div>
   );
+}
+
+export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  if (!isAuthenticated) {
+    return <PinLoginGate onAuthenticated={() => setIsAuthenticated(true)} />;
+  }
+
+  return <StudioWorkspace />;
 }
