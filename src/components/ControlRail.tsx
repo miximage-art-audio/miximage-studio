@@ -1,17 +1,17 @@
 import React, { useRef } from 'react';
-import { Activity, EyeOff, Film, ImagePlus, Music2, RotateCcw, Sliders, Sparkles, Upload } from 'lucide-react';
+import { Activity, Clock, EyeOff, ImagePlus, Music2, RotateCcw, Sliders, Sparkles, Upload } from 'lucide-react';
 import {
   ASPECT_RATIOS,
   AspectRatioKey,
   BASS_INTENSITY_PRESETS,
   COLOR_THEMES,
   ColorThemeKey,
+  ColorThemeSpec,
   FIT_MODES,
   FitMode,
   FpsOption,
   SUPPORTED_AUDIO_EXTENSIONS,
   SUPPORTED_IMAGE_EXTENSIONS,
-  SUPPORTED_VIDEO_EXTENSIONS,
   WAVEFORM_STYLES,
   WaveformColorMix,
   WaveformLayoutConfig,
@@ -25,10 +25,7 @@ import { DEMO_ARTWORKS } from '../engine/demoArtworks';
 interface ControlRailProps {
   selectedArtworkId: string;
   customImageName: string | null;
-  mediaType: 'image' | 'video';
-  videoDuration: number;
   customDuration: number | null;
-  trimStartSec: number;
   audioName: string;
   isDemoAudio: boolean;
   songDuration?: number;
@@ -44,9 +41,7 @@ interface ControlRailProps {
   audioError: string | null;
   onSelectDemoArtwork: (id: string) => void;
   onUploadImage: (file: File) => void;
-  onUploadVideo: (file: File) => void;
   onChangeCustomDuration: (dur: number | null) => void;
-  onChangeTrimStartSec: (start: number) => void;
   onUseDemoAudio: () => void;
   onUploadAudio: (file: File) => void;
   onChangeRatio: (ratio: AspectRatioKey) => void;
@@ -62,13 +57,15 @@ interface ControlRailProps {
   children?: React.ReactNode;
 }
 
+const ALL_THEME_LIST = Object.values(COLOR_THEMES) as ColorThemeSpec[];
+const CLASSIC_THEMES = ALL_THEME_LIST.filter((t) => t.category === 'classic');
+const TWOTONE_THEMES = ALL_THEME_LIST.filter((t) => t.category === 'twotone');
+const GRADIENT_THEMES = ALL_THEME_LIST.filter((t) => t.category === 'gradient');
+
 export const ControlRail: React.FC<ControlRailProps> = ({
   selectedArtworkId,
   customImageName,
-  mediaType,
-  videoDuration,
   customDuration,
-  trimStartSec,
   audioName,
   isDemoAudio,
   songDuration = 16,
@@ -84,9 +81,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   audioError,
   onSelectDemoArtwork,
   onUploadImage,
-  onUploadVideo,
   onChangeCustomDuration,
-  onChangeTrimStartSec,
   onUseDemoAudio,
   onUploadAudio,
   onChangeRatio,
@@ -102,7 +97,6 @@ export const ControlRail: React.FC<ControlRailProps> = ({
   children,
 }) => {
   const imgInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const lastNonZeroBassRef = useRef<number>(bassIntensity > 0 ? bassIntensity : 1.0);
 
@@ -110,42 +104,68 @@ export const ControlRail: React.FC<ControlRailProps> = ({
     onChangeWaveformLayout(clampWaveformLayout({ ...waveformLayout, ...patch }));
   };
 
-  const targetSongDur = songDuration || 16;
-  const masterMax =
-    mediaType === 'video' && videoDuration > 0
-      ? Math.max(targetSongDur, videoDuration)
+  const targetSongDur = songDuration > 0 ? songDuration : 16;
+  const activeDuration =
+    customDuration !== null && customDuration > 0
+      ? Math.max(1, Math.min(customDuration, targetSongDur))
       : targetSongDur;
-  const activeDuration = customDuration ?? targetSongDur;
+
+  const renderThemeButtons = (items: ColorThemeSpec[], isTwoTone = false) => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+      {items.map((item) => {
+        const active = theme === item.key;
+        const c1 = `rgb(${item.c1Rgb.join(',')})`;
+        const cMid = `rgb(${item.cMidRgb.join(',')})`;
+        const c2 = `rgb(${item.c2Rgb.join(',')})`;
+        const swatchBg = isTwoTone
+          ? `linear-gradient(90deg, ${c1} 0%, ${c1} 48%, ${c2} 52%, ${c2} 100%)`
+          : `linear-gradient(90deg, ${c1}, ${cMid}, ${c2})`;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onChangeTheme(item.key)}
+            aria-pressed={active}
+            title={item.description}
+            className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+              active
+                ? 'border-sky-400 bg-sky-500/15 text-slate-50'
+                : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className="w-4 h-2.5 rounded-xs shrink-0 border border-white/10"
+                style={{ background: swatchBg }}
+              />
+              <span className="text-[11px] font-semibold truncate">{item.label}</span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <aside
       aria-label="แผงควบคุมพารามิเตอร์เรนเดอร์"
       className="bg-[#111827] border border-slate-800 rounded-xl p-3.5 lg:p-4 flex flex-col gap-2.5 lg:h-full lg:overflow-y-auto lg:justify-between"
     >
-      {/* 1. Media Inputs */}
+      {/* 1. Media Inputs (Image & Audio ONLY) */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
-            1. สื่อต้นฉบับ (ภาพ/วิดีโอ และเสียง)
+            1. สื่อต้นฉบับ (รูปภาพ และไฟล์เสียง)
           </h2>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => imgInputRef.current?.click()}
-              className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-1.5 py-0.5"
-            >
-              <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>ภาพ</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => videoInputRef.current?.click()}
-              className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded px-1.5 py-0.5"
-            >
-              <Film className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>วิดีโอ</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => imgInputRef.current?.click()}
+            className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded px-2 py-0.5 border border-sky-500/30 bg-sky-500/10"
+          >
+            <ImagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>เลือกรูปภาพ (.png, .jpg)</span>
+          </button>
           <input
             ref={imgInputRef}
             type="file"
@@ -158,40 +178,28 @@ export const ControlRail: React.FC<ControlRailProps> = ({
               e.target.value = '';
             }}
           />
-          <input
-            ref={videoInputRef}
-            type="file"
-            aria-label="อัปโหลดไฟล์วิดีโอ"
-            accept={SUPPORTED_VIDEO_EXTENSIONS.join(',')}
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUploadVideo(f);
-              e.target.value = '';
-            }}
-          />
         </div>
 
-        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
+        <div className="grid grid-cols-1 gap-1.5">
           {DEMO_ARTWORKS.map((art) => {
-            const active = mediaType === 'image' && selectedArtworkId === art.id;
+            const active = selectedArtworkId === art.id;
             return (
               <button
                 key={art.id}
                 type="button"
                 onClick={() => onSelectDemoArtwork(art.id)}
-                className={`group relative rounded-lg overflow-hidden border text-left transition-all flex items-center gap-2 p-1.5 bg-[#0D1320] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`group relative rounded-lg overflow-hidden border text-left transition-all flex items-center gap-2.5 p-1.5 bg-[#0D1320] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 ring-1 ring-sky-400/40'
                     : 'border-slate-800 hover:border-slate-600'
                 }`}
               >
-                <div className="w-11 h-8 rounded bg-slate-900 overflow-hidden shrink-0">
+                <div className="w-11 h-9 rounded bg-[#070B14] border border-slate-800/80 overflow-hidden shrink-0 flex items-center justify-center p-1">
                   <img
                     src={art.src}
                     alt={art.title}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200"
                   />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -207,25 +215,18 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        {/* Video & Song Duration & Trim Controls */}
+        {/* Render Duration Control (Defaults to Full Song) */}
         <div className="bg-[#090D16] border border-emerald-500/40 rounded-lg p-2.5 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-              <Film className="w-3.5 h-3.5" aria-hidden="true" />
+              <Clock className="w-3.5 h-3.5" aria-hidden="true" />
               <span>ความยาวคลิปที่จะเรนเดอร์</span>
             </div>
             <span className="font-mono text-slate-300 font-semibold text-xs">
-              {formatTime(activeDuration)} / {formatTime(masterMax)}
+              {formatTime(activeDuration)} / {formatTime(targetSongDur)}
             </span>
           </div>
 
-          {mediaType === 'video' && videoDuration > 0 && videoDuration < activeDuration && (
-            <div className="text-[11px] text-emerald-300/90 bg-emerald-950/40 border border-emerald-800/40 px-2 py-1 rounded">
-              🔁 วิดีโอพื้นหลัง ({formatTime(videoDuration)}) จะวนลูปซ้ำอัตโนมัติตลอดความยาวเพลง ({formatTime(activeDuration)})
-            </div>
-          )}
-
-          {/* Quick Presets */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
@@ -238,20 +239,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             >
               เต็มเพลง ({formatTime(targetSongDur)})
             </button>
-            {mediaType === 'video' && videoDuration > 0 && Math.abs(videoDuration - targetSongDur) > 0.5 && (
-              <button
-                type="button"
-                onClick={() => onChangeCustomDuration(videoDuration)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
-                  customDuration !== null && Math.abs(activeDuration - videoDuration) < 0.2
-                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                ตามวิดีโอ ({formatTime(videoDuration)})
-              </button>
-            )}
-            {masterMax > 15 && (
+            {targetSongDur > 15 && (
               <button
                 type="button"
                 onClick={() => onChangeCustomDuration(15)}
@@ -264,7 +252,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 15 วิ (Shorts)
               </button>
             )}
-            {masterMax > 30 && (
+            {targetSongDur > 30 && (
               <button
                 type="button"
                 onClick={() => onChangeCustomDuration(30)}
@@ -277,7 +265,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 30 วิ (Reels/TikTok)
               </button>
             )}
-            {masterMax > 60 && (
+            {targetSongDur > 60 && (
               <button
                 type="button"
                 onClick={() => onChangeCustomDuration(60)}
@@ -292,48 +280,40 @@ export const ControlRail: React.FC<ControlRailProps> = ({
             )}
           </div>
 
-          {/* Duration Slider */}
           <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>ปรับความยาวคลิป:</span>
-              <span className="font-mono text-emerald-300 font-medium">
-                {activeDuration.toFixed(1)} วินาที
-              </span>
+            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+              <label htmlFor="clip-duration-slider">ปรับความยาวเอง (วินาที):</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="clip-duration-number"
+                  type="number"
+                  aria-label="กำหนดความยาวคลิปเป็นวินาที"
+                  min={1}
+                  max={Math.max(1, Number(targetSongDur.toFixed(1)))}
+                  step={0.5}
+                  value={Number(activeDuration.toFixed(1))}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) {
+                      onChangeCustomDuration(Math.max(1, Math.min(v, targetSongDur)));
+                    }
+                  }}
+                  className="w-16 px-1.5 py-0.5 rounded bg-[#0D1320] border border-slate-700 text-right font-mono text-emerald-300 text-[11px] focus:outline-none focus:border-emerald-400"
+                />
+                <span className="font-mono text-slate-400">วิ</span>
+              </div>
             </div>
             <input
+              id="clip-duration-slider"
               type="range"
               min={1}
-              max={Math.max(1, masterMax)}
+              max={Math.max(1, targetSongDur)}
               step={0.5}
               value={activeDuration}
               onChange={(e) => onChangeCustomDuration(parseFloat(e.target.value))}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
             />
           </div>
-
-          {/* Trim Start Offset (if video is active) */}
-          {mediaType === 'video' && videoDuration > 0 && activeDuration < videoDuration - 0.5 && (
-            <div className="flex flex-col gap-1 pt-1.5 border-t border-slate-800/80">
-              <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span>เริ่มเล่นจากวินาทีที่:</span>
-                <span className="font-mono text-slate-300">
-                  {formatTime(trimStartSec)} ({trimStartSec.toFixed(1)}s)
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, videoDuration - activeDuration)}
-                step={0.5}
-                value={trimStartSec}
-                onChange={(e) => onChangeTrimStartSec(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>ช่วงที่ตัด: {formatTime(trimStartSec)} - {formatTime(trimStartSec + activeDuration)}</span>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -377,11 +357,13 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           </p>
           {customImageName && (
             <p className="text-sky-300 truncate shrink-0 max-w-[180px]">
-              {mediaType === 'video' ? 'วิดีโอ:' : 'ภาพ:'} {customImageName}
+              ภาพ: {customImageName}
             </p>
           )}
         </div>
-        <p className="text-[11px] text-slate-400">ถอดรหัสเสียงในเบราว์เซอร์โดยตรง รูปแบบที่ใช้ได้ขึ้นกับเบราว์เซอร์ แนะนำ MP3 หรือ WAV PCM</p>
+        <p className="text-[11px] text-slate-400">
+          ถอดรหัสเสียงในเบราว์เซอร์โดยตรง รูปแบบที่ใช้ได้ขึ้นกับเบราว์เซอร์ แนะนำ MP3 หรือ WAV PCM
+        </p>
 
         {audioError && (
           <p role="alert" className="text-xs text-rose-400">
@@ -431,7 +413,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
           {FIT_MODES.map((m) => {
             const active = fitMode === m.key;
             return (
@@ -440,14 +422,15 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 type="button"
                 onClick={() => onChangeFitMode(m.key)}
                 aria-pressed={active}
-                className={`px-2.5 py-1.5 rounded-lg border flex items-center justify-between gap-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                title={m.description}
+                className={`px-2 py-1.5 rounded-lg border flex items-center justify-between gap-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
-                <span className="text-xs font-semibold truncate">{m.label}</span>
-                <span className="text-[10px] font-mono text-slate-400 shrink-0">{m.key}</span>
+                <span className="text-[11px] font-semibold truncate">{m.label}</span>
+                <span className="text-[9px] font-mono text-slate-400 shrink-0">{m.key}</span>
               </button>
             );
           })}
@@ -456,11 +439,11 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
       <hr className="border-slate-800/80" />
 
-      {/* 3. Waveform Style (15 styles) & Color Theme */}
+      {/* 3. Waveform Style (20 styles incl. 5 DJ Smooth) & Color Themes */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs sm:text-sm font-semibold text-slate-100">
-            3. รูปแบบคลื่นเสียง (15 แบบ) และโทนสี
+            3. รูปแบบคลื่นเสียง ({WAVEFORM_STYLES.length} แบบ) และโทนสี
           </h2>
           <span className="text-[11px] font-mono text-slate-400">
             {showWaveform ? style : 'ไม่ใส่คลื่นเสียง (ปิด)'}
@@ -499,11 +482,15 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
         {!showWaveform && (
           <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded-lg p-2 leading-relaxed">
-            ℹ️ <strong>กำลังปิดคลื่นเสียง:</strong> วิดีโอจะเน้นเฉพาะภาพหรือวิดีโอพื้นหลัง (สามารถคลิกเลือกรูปแบบด้านล่างเพื่อเปิดใช้งานคลื่นเสียงได้ทันที)
+            ℹ️ <strong>กำลังปิดคลื่นเสียง:</strong> วิดีโอจะเน้นเฉพาะภาพพื้นหลัง (คลิกเลือกรูปแบบคลื่นด้านล่างเพื่อเปิดได้ทันที)
           </div>
         )}
 
-        <div className={`grid grid-cols-3 sm:grid-cols-5 gap-1 transition-opacity ${!showWaveform ? 'opacity-50' : 'opacity-100'}`}>
+        <div
+          className={`grid grid-cols-3 sm:grid-cols-5 gap-1 transition-opacity ${
+            !showWaveform ? 'opacity-50' : 'opacity-100'
+          }`}
+        >
           {WAVEFORM_STYLES.map((item) => {
             const active = showWaveform && style === item.key;
             return (
@@ -519,7 +506,9 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                 className={`px-1.5 py-1.5 rounded-md border text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-sky-400 bg-sky-500/15 text-slate-50'
-                    : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
+                    : item.isDjSmooth
+                      ? 'border-violet-500/35 bg-[#121629] text-violet-200 hover:border-violet-400'
+                      : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
                 }`}
               >
                 <div className="text-[11px] font-medium truncate">{item.label}</div>
@@ -528,37 +517,58 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           })}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-          {(Object.keys(COLOR_THEMES) as ColorThemeKey[]).map((key) => {
-            const item = COLOR_THEMES[key];
-            const active = theme === key;
-            const c1 = `rgb(${item.c1Rgb.join(',')})`;
-            const cMid = `rgb(${item.cMidRgb.join(',')})`;
-            const c2 = `rgb(${item.c2Rgb.join(',')})`;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onChangeTheme(key)}
-                aria-pressed={active}
-                title={item.description}
-                className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-                  active
-                    ? 'border-sky-400 bg-sky-500/15 text-slate-50'
-                    : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span
-                    aria-hidden="true"
-                    className="w-3.5 h-2.5 rounded-xs shrink-0"
-                    style={{ background: `linear-gradient(90deg, ${c1}, ${cMid}, ${c2})` }}
-                  />
-                  <span className="text-[11px] font-semibold truncate">{item.label}</span>
-                </div>
-              </button>
-            );
-          })}
+        {/* Preset Color Themes: Classic (4), Two-Tone (5), Gradient (5) */}
+        <div className="flex flex-col gap-2 pt-1">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              ชุดสีหลัก ({CLASSIC_THEMES.length} แบบ)
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {CLASSIC_THEMES.map((item) => {
+                const active = theme === item.key;
+                const c1 = `rgb(${item.c1Rgb.join(',')})`;
+                const cMid = `rgb(${item.cMidRgb.join(',')})`;
+                const c2 = `rgb(${item.c2Rgb.join(',')})`;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => onChangeTheme(item.key)}
+                    aria-pressed={active}
+                    title={item.description}
+                    className={`px-2 py-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                      active
+                        ? 'border-sky-400 bg-sky-500/15 text-slate-50'
+                        : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className="w-3.5 h-2.5 rounded-xs shrink-0"
+                        style={{ background: `linear-gradient(90deg, ${c1}, ${cMid}, ${c2})` }}
+                      />
+                      <span className="text-[11px] font-semibold truncate">{item.label}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/90">
+              เฉดสีทูโทนสำเร็จรูป ({TWOTONE_THEMES.length} เฉด)
+            </span>
+            {renderThemeButtons(TWOTONE_THEMES, true)}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-300/90">
+              เฉดสีไล่เฉดสำเร็จรูป ({GRADIENT_THEMES.length} เฉด)
+            </span>
+            {renderThemeButtons(GRADIENT_THEMES, false)}
+          </div>
         </div>
 
         {/* 3-Color Custom Mixer */}
@@ -637,7 +647,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
         </div>
 
         {/* Quick vertical position presets */}
-        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
+        <div className="grid grid-cols-3 gap-1.5">
           <button
             type="button"
             onClick={() => updateLayout({ posX: 0.5, posY: 0.2 })}
@@ -744,7 +754,6 @@ export const ControlRail: React.FC<ControlRailProps> = ({
               onChange={(e) => updateLayout({ opacity: parseFloat(e.target.value) })}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
             />
-            {/* Quick Presets for Transparency / Opacity */}
             <div className="flex items-center gap-1 mt-1 flex-wrap">
               <button
                 type="button"
@@ -852,7 +861,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
 
         {bassIntensity === 0 ? (
           <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded-lg p-2 leading-relaxed">
-            ℹ️ <strong>ปิดแรงกระตุกเบสอยู่:</strong> ภาพพื้นหลังจะอยู่นิ่งสนิท ไม่มีการซูมหรือสั่นไหวตามจังหวะเบส (สามารถคลิกเลือกปุ่มความแรงด้านล่างเพื่อเปิดใช้งานได้ทันที)
+            ℹ️ <strong>ปิดแรงกระตุกเบสอยู่:</strong> ภาพพื้นหลังจะอยู่นิ่งสนิท ไม่มีการซูมหรือสั่นไหวตามจังหวะเบส
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
@@ -887,7 +896,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
           </div>
         )}
 
-        <div className={`grid gap-1.5 ${DEMO_ARTWORKS.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
           {BASS_INTENSITY_PRESETS.map((preset) => {
             const active = Math.abs(bassIntensity - preset.value) < 0.025;
             return (
@@ -899,7 +908,7 @@ export const ControlRail: React.FC<ControlRailProps> = ({
                   onChangeBassIntensity(preset.value);
                 }}
                 aria-pressed={active}
-                className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                className={`px-1.5 py-1.5 rounded-lg border text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                   active
                     ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200 font-semibold shadow-sm'
                     : 'border-slate-800 bg-[#0D1320] text-slate-300 hover:border-slate-600'

@@ -520,7 +520,7 @@ export function encodeWav(samples: Float32Array, sampleRate = 44100): Uint8Array
 }
 
 /**
- * Computes cover crop and blur_pad contain geometry for given source and target sizes.
+ * Computes cover crop, blur_pad contain, and center padded geometry for given source and target sizes.
  */
 export function computeFitGeometry(
   srcW: number,
@@ -528,20 +528,30 @@ export function computeFitGeometry(
   targetW: number,
   targetH: number
 ) {
-  const scaleCover = Math.max(targetW / srcW, targetH / srcH);
-  const coverW = Math.round(srcW * scaleCover);
-  const coverH = Math.round(srcH * scaleCover);
+  const safeSrcW = Math.max(1, srcW);
+  const safeSrcH = Math.max(1, srcH);
+
+  const scaleCover = Math.max(targetW / safeSrcW, targetH / safeSrcH);
+  const coverW = Math.round(safeSrcW * scaleCover);
+  const coverH = Math.round(safeSrcH * scaleCover);
   const coverX = Math.floor((targetW - coverW) / 2);
   const coverY = Math.floor((targetH - coverH) / 2);
 
-  const scaleContain = Math.min(targetW / srcW, targetH / srcH);
-  const containW = Math.round(srcW * scaleContain);
-  const containH = Math.round(srcH * scaleContain);
+  const scaleContain = Math.min(targetW / safeSrcW, targetH / safeSrcH);
+  const containW = Math.round(safeSrcW * scaleContain);
+  const containH = Math.round(safeSrcH * scaleContain);
   const containX = Math.floor((targetW - containW) / 2);
   const containY = Math.floor((targetH - containH) / 2);
+
+  const scaleCenter = Math.min((targetW * 0.64) / safeSrcW, (targetH * 0.56) / safeSrcH);
+  const centerW = Math.round(safeSrcW * scaleCenter);
+  const centerH = Math.round(safeSrcH * scaleCenter);
+  const centerX = Math.floor((targetW - centerW) / 2);
+  const centerY = Math.floor((targetH - centerH) / 2);
 
   return {
     cover: { x: coverX, y: coverY, w: coverW, h: coverH },
     contain: { x: containX, y: containY, w: containW, h: containH },
+    center: { x: centerX, y: centerY, w: centerW, h: centerH },
   };
 }

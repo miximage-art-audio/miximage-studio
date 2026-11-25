@@ -28,7 +28,6 @@ import {
   RenderSurface,
   createRenderSurface,
   renderStudioFrame,
-  updateRenderSurfaceBase,
 } from './engine/renderer';
 
 function getPreviewDimensions(ratio: AspectRatioKey): { w: number; h: number } {
@@ -56,19 +55,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
   const [isRenderModalOpen, setIsRenderModalOpen] = useState(false);
 
-  // Media state (Image or Video)
-  const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
+  // Image artwork state
   const [selectedArtworkId, setSelectedArtworkId] = useState<string>(DEMO_ARTWORKS[0].id);
   const [customImageName, setCustomImageName] = useState<string | null>(null);
   const [imageSrc, setImageSrc] = useState<string>(DEMO_ARTWORKS[0].src);
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
 
-  // Video State
-  const [loadedVideo, setLoadedVideo] = useState<HTMLVideoElement | null>(null);
-  const [videoDuration, setVideoDuration] = useState<number>(0);
+  // Render length state (null = full song by default)
   const [customDuration, setCustomDuration] = useState<number | null>(null);
-  const [trimStartSec, setTrimStartSec] = useState<number>(0);
-  const customVideoUrlRef = useRef<string | null>(null);
 
   const [audioName, setAudioName] = useState<string>('Demo Bass Track (128 BPM · 16s)');
   const [isDemoAudio, setIsDemoAudio] = useState<boolean>(true);
@@ -76,7 +70,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(true);
 
   const [ratio, setRatio] = useState<AspectRatioKey>('16:9');
-  const [fitMode, setFitMode] = useState<FitMode>('cover');
+  const [fitMode, setFitMode] = useState<FitMode>('center');
   const [style, setStyle] = useState<WaveformStyle>('bars_3d');
   const [showWaveform, setShowWaveform] = useState<boolean>(true);
   const [theme, setTheme] = useState<ColorThemeKey>('cyberpunk');
@@ -96,24 +90,17 @@ export default function App() {
   const [audioBufferForRender, setAudioBufferForRender] = useState<AudioBuffer | null>(null);
   const [dspResult, setDspResult] = useState<DspAnalysisResult | null>(null);
 
-  // Duration calculations (Song/Audio is master by default, video loops if shorter)
+  // Song duration & active render duration (default: full song)
   const songDuration = useMemo(() => {
     return dspResult?.durationSec ?? (audioSamples ? audioSamples.length / audioSampleRate : 16);
   }, [dspResult?.durationSec, audioSamples, audioSampleRate]);
 
-  const maxAvailableDuration = useMemo(() => {
-    if (mediaType === 'video' && videoDuration > 0) {
-      return Math.max(songDuration, videoDuration);
-    }
-    return songDuration;
-  }, [mediaType, videoDuration, songDuration]);
-
   const effectiveDuration = useMemo(() => {
     if (customDuration !== null && customDuration > 0) {
-      return Math.max(0.5, Math.min(customDuration, maxAvailableDuration));
+      return Math.max(0.5, Math.min(customDuration, songDuration));
     }
     return Math.max(0.5, songDuration);
-  }, [customDuration, maxAvailableDuration, songDuration]);
+  }, [customDuration, songDuration]);
 
   // Playback UI State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -150,8 +137,6 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
-    mediaType,
-    trimStartSec,
     showWaveform,
   });
 
@@ -163,8 +148,6 @@ export default function App() {
     fps,
     dspResult,
     waveformLayout,
-    mediaType,
-    trimStartSec,
     showWaveform,
   };
 
@@ -172,7 +155,6 @@ export default function App() {
 
   // 1. Load artwork image into HTMLImageElement
   useEffect(() => {
-    if (mediaType !== 'image') return;
     let cancelled = false;
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -185,27 +167,18 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [imageSrc, mediaType]);
+  }, [imageSrc]);
 
-  // 2. Rebuild preview RenderSurface when media, ratio, or fitMode changes
+  // 2. Rebuild preview RenderSurface when image, ratio, or fitMode changes
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !loadedImage) return;
     const { w, h } = getPreviewDimensions(ratio);
     canvasRef.current.width = w;
     canvasRef.current.height = h;
+    surfaceRef.current = createRenderSurface(loadedImage, w, h, fitMode);
+  }, [loadedImage, ratio, fitMode, activeTab]);
 
-    if (mediaType === 'video') {
-      if (loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
-        surfaceRef.current = createRenderSurface(loadedVideo, w, h, fitMode);
-      }
-    } else {
-      if (loadedImage) {
-        surfaceRef.current = createRenderSurface(loadedImage, w, h, fitMode);
-      }
-    }
-  }, [mediaType, loadedImage, loadedVideo, ratio, fitMode, activeTab]);
-
-  // 3. Helper to stop Web Audio & video playback cleanly
+  // 3. Helper to stop Web Audio playback cleanly
   const stopAudioSource = useCallback(() => {
     if (sourceNodeRef.current) {
       try {
@@ -217,19 +190,13 @@ export default function App() {
       }
       sourceNodeRef.current = null;
     }
-    if (loadedVideo) {
-      try {
-        loadedVideo.pause();
-      } catch {
-        // Ignore video pause error
-      }
-    }
-  }, [loadedVideo]);
+  }, []);
 
   // 4. Load deterministic Demo Bass Track on initial mount
   const loadDemoAudio = useCallback(() => {
     stopAudioSource();
     setAudioBufferForRender(null);
+    setCustomDuration(null);
     setIsPlaying(false);
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0;
@@ -241,7 +208,7 @@ export default function App() {
       const sr = 44100;
       const samples = generateDemoBassTrack(16, sr);
 
-      audioBufferRef.current = null; // Hydrated lazily on Play via AudioContext
+      audioBufferRef.current = null;
       setAudioSamples(samples);
       setAudioSampleRate(sr);
       setAudioName('Demo Bass Track (128 BPM · 16s)');
@@ -255,7 +222,6 @@ export default function App() {
     return () => {
       stopAudioSource();
       if (customImgUrlRef.current) URL.revokeObjectURL(customImgUrlRef.current);
-      if (customVideoUrlRef.current) URL.revokeObjectURL(customVideoUrlRef.current);
       if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
         audioCtxRef.current.close().catch(() => {});
       }
@@ -286,8 +252,6 @@ export default function App() {
         colorMix: cMix,
         bassIntensity: bInt,
         waveformLayout: wfLayout,
-        mediaType: mType,
-        trimStartSec: tStart,
         showWaveform: isWfVisible,
       } = paramsRef.current;
       if (!canvas || !surface || !dsp) return { bassVal: 0, onsetFlux: 0 };
@@ -295,46 +259,6 @@ export default function App() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return { bassVal: 0, onsetFlux: 0 };
 
-      // Update background frame if video is active (with seamless looping across long songs)
-      if (mType === 'video' && loadedVideo && loadedVideo.videoWidth > 0 && loadedVideo.videoHeight > 0) {
-        const vDur = loadedVideo.duration || videoDuration || 1;
-        const targetVideoTime = vDur > 0 ? (tStart + timeSec) % vDur : 0;
-
-        if (playStateRef.current.isPlaying) {
-          // While playing, make sure the video is actively playing smoothly without constantly seeking
-          if (loadedVideo.paused) {
-            loadedVideo.play().catch(() => {});
-          }
-          // Only re-sync if drift is large (> 1.2s) and not near the loop wrap
-          const drift = Math.abs(loadedVideo.currentTime - targetVideoTime);
-          if (drift > 1.2 && drift < vDur - 0.4) {
-            try {
-              loadedVideo.currentTime = targetVideoTime;
-            } catch {
-              // ignore seek errors
-            }
-          }
-        } else {
-          // While paused, seek immediately when scrubbing
-          if (Math.abs(loadedVideo.currentTime - targetVideoTime) > 0.04) {
-            try {
-              loadedVideo.currentTime = targetVideoTime;
-            } catch {
-              // ignore seek errors
-            }
-          }
-        }
-
-        updateRenderSurfaceBase(
-          surface,
-          loadedVideo,
-          loadedVideo.videoWidth,
-          loadedVideo.videoHeight,
-          fitMode
-        );
-      }
-
-      // Sample audio DSP at matching time
       const audioTime = isDemoAudio ? timeSec % (dsp.durationSec || 16) : timeSec;
       const specCol = new Float32Array(64);
       const { bassVal, onsetFlux, exactFrame } = sampleDspAtTime(dsp, audioTime, specCol);
@@ -355,7 +279,7 @@ export default function App() {
       );
       return { bassVal, onsetFlux };
     },
-    [fitMode, isDemoAudio, loadedVideo]
+    [isDemoAudio]
   );
 
   // Re-draw static preview immediately whenever parameters, surface, or seek time change while paused
@@ -366,9 +290,7 @@ export default function App() {
     setCurrentOnsetFlux(onsetFlux);
   }, [
     activeTab,
-    mediaType,
     loadedImage,
-    loadedVideo,
     ratio,
     fitMode,
     style,
@@ -380,7 +302,6 @@ export default function App() {
     waveformLayout,
     dspResult,
     currentTime,
-    trimStartSec,
     drawFrameAtTime,
   ]);
 
@@ -495,29 +416,10 @@ export default function App() {
         playStateRef.current.startedAtCtxTime = ctx.currentTime;
       }
 
-      if (mediaType === 'video' && loadedVideo) {
-        try {
-          loadedVideo.loop = true;
-          loadedVideo.muted = true;
-          const vDur = loadedVideo.duration || 1;
-          const startVTime = vDur > 0 ? (trimStartSec + offsetSec) % vDur : 0;
-          loadedVideo.currentTime = startVTime;
-          const playPromise = loadedVideo.play();
-          if (playPromise !== undefined) {
-            playPromise.catch(() => {
-              loadedVideo.muted = true;
-              loadedVideo.play().catch(() => {});
-            });
-          }
-        } catch {
-          // ignore play error
-        }
-      }
-
       playStateRef.current.isPlaying = true;
       setIsPlaying(true);
     },
-    [ensureAudioReady, isDemoAudio, loadedVideo, mediaType, stopAudioSource, trimStartSec]
+    [ensureAudioReady, isDemoAudio, stopAudioSource]
   );
 
   const handleTogglePlay = useCallback(() => {
@@ -555,14 +457,11 @@ export default function App() {
     } else {
       playStateRef.current.offsetSec = 0;
       setCurrentTime(0);
-      if (loadedVideo) {
-        loadedVideo.currentTime = trimStartSec;
-      }
       const { bassVal, onsetFlux } = drawFrameAtTime(0);
       setCurrentBassVal(bassVal);
       setCurrentOnsetFlux(onsetFlux);
     }
-  }, [drawFrameAtTime, loadedVideo, startPlaybackAt, trimStartSec]);
+  }, [drawFrameAtTime, startPlaybackAt]);
 
   const handleSeek = useCallback(
     (timeSec: number) => {
@@ -588,19 +487,13 @@ export default function App() {
     }
   }, [isMuted]);
 
-  // 9. Handle Artwork / Image / Video / Audio Uploads
+  // 9. Handle Image & Audio Uploads (Images & Audio ONLY)
   const handleSelectDemoArtwork = (id: string) => {
     const found = DEMO_ARTWORKS.find((a) => a.id === id);
     if (!found) return;
-    setMediaType('image');
-    if (loadedVideo) {
-      loadedVideo.pause();
-      setLoadedVideo(null);
-    }
-    setCustomDuration(null);
-    setTrimStartSec(0);
     setSelectedArtworkId(id);
     setCustomImageName(null);
+    setFitMode('center');
     setImageSrc(found.src);
   };
 
@@ -610,86 +503,10 @@ export default function App() {
     }
     const url = URL.createObjectURL(file);
     customImgUrlRef.current = url;
-    setMediaType('image');
-    if (loadedVideo) {
-      loadedVideo.pause();
-      setLoadedVideo(null);
-    }
-    setCustomDuration(null);
-    setTrimStartSec(0);
     setSelectedArtworkId('custom');
     setCustomImageName(file.name);
     setImageSrc(url);
   };
-
-  const handleUploadVideo = useCallback(
-    async (file: File) => {
-      stopAudioSource();
-      if (customVideoUrlRef.current) {
-        URL.revokeObjectURL(customVideoUrlRef.current);
-      }
-
-      const url = URL.createObjectURL(file);
-      customVideoUrlRef.current = url;
-
-      const video = document.createElement('video');
-      video.crossOrigin = 'anonymous';
-      video.playsInline = true;
-      video.muted = true;
-      video.preload = 'auto';
-      video.src = url;
-      video.load();
-
-      video.onloadedmetadata = async () => {
-        const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
-        setVideoDuration(dur);
-        if (isDemoAudio) {
-          setCustomDuration(dur);
-        } else {
-          setCustomDuration(null); // Keep full song length if song is already uploaded!
-        }
-        setTrimStartSec(0);
-        setLoadedVideo(video);
-        setMediaType('video');
-        setSelectedArtworkId('custom-video');
-        setCustomImageName(file.name);
-
-        video.currentTime = 0;
-
-        // Try extracting audio track directly from the video file
-        try {
-          const Ctx =
-            window.AudioContext ||
-            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-          const decodeCtx = audioCtxRef.current || new Ctx();
-          if (!audioCtxRef.current) {
-            audioCtxRef.current = decodeCtx;
-            gainNodeRef.current = decodeCtx.createGain();
-            gainNodeRef.current.gain.value = isMuted ? 0 : 1;
-            gainNodeRef.current.connect(decodeCtx.destination);
-          }
-
-          const rawBytes = await file.arrayBuffer();
-          const decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
-          if (decodedBuffer && decodedBuffer.length > 0 && decodedBuffer.duration > 0) {
-            const mono = mixAudioBufferToMono(decodedBuffer);
-            audioBufferRef.current = decodedBuffer;
-            setAudioBufferForRender(decodedBuffer);
-            setAudioSamples(mono);
-            setAudioSampleRate(decodedBuffer.sampleRate);
-            setAudioName(`${file.name} (Audio)`);
-            setIsDemoAudio(false);
-          }
-        } catch {
-          // Keep current audio track if video lacks audio
-        }
-
-        setCurrentTime(0);
-        playStateRef.current.offsetSec = 0;
-      };
-    },
-    [isDemoAudio, isMuted, stopAudioSource]
-  );
 
   const handleUploadAudio = async (file: File) => {
     stopAudioSource();
@@ -701,7 +518,7 @@ export default function App() {
     playStateRef.current.isPlaying = false;
     playStateRef.current.offsetSec = 0;
     setCurrentTime(0);
-    setCustomDuration(null); // Always default to the full song length!
+    setCustomDuration(null); // Always default to full song length!
     setAudioError(null);
     setIsAnalyzing(true);
 
@@ -722,7 +539,6 @@ export default function App() {
         const rawBytes = await file.arrayBuffer();
         decodedBuffer = await decodeCtx.decodeAudioData(rawBytes.slice(0));
       } catch {
-        // Fallback to server Universal Audio Pipeline when server is running
         const form = new FormData();
         form.append('audio', file);
         const res = await fetch('/api/decode-audio', {
@@ -800,12 +616,7 @@ export default function App() {
         onSelectTab={setActiveTab}
         onOpenRenderModal={() => setIsRenderModalOpen(true)}
         isRendering={false}
-        canRender={
-          !isAnalyzing &&
-          ((mediaType === 'image' && Boolean(loadedImage)) ||
-            (mediaType === 'video' && Boolean(loadedVideo))) &&
-          Boolean(audioSamples)
-        }
+        canRender={!isAnalyzing && Boolean(loadedImage) && Boolean(audioSamples)}
       />
 
       <main
@@ -850,6 +661,7 @@ export default function App() {
               <ControlRail
                 selectedArtworkId={selectedArtworkId}
                 customImageName={customImageName}
+                customDuration={customDuration}
                 audioName={audioName}
                 isDemoAudio={isDemoAudio}
                 songDuration={songDuration}
@@ -863,15 +675,9 @@ export default function App() {
                 fps={fps}
                 waveformLayout={waveformLayout}
                 audioError={audioError}
-                mediaType={mediaType}
-                videoDuration={videoDuration}
-                customDuration={customDuration}
-                trimStartSec={trimStartSec}
                 onSelectDemoArtwork={handleSelectDemoArtwork}
                 onUploadImage={handleUploadImage}
-                onUploadVideo={handleUploadVideo}
                 onChangeCustomDuration={setCustomDuration}
-                onChangeTrimStartSec={setTrimStartSec}
                 onUseDemoAudio={loadDemoAudio}
                 onUploadAudio={handleUploadAudio}
                 onChangeRatio={setRatio}
@@ -902,13 +708,10 @@ export default function App() {
       <RenderExportModal
         isOpen={isRenderModalOpen}
         onClose={() => setIsRenderModalOpen(false)}
-        mediaType={mediaType}
         imageEl={loadedImage}
-        videoEl={loadedVideo}
         renderDuration={effectiveDuration}
         songDuration={songDuration}
         showWaveform={showWaveform}
-        trimStartSec={trimStartSec}
         audioSamples={audioSamples}
         audioBuffer={audioBufferForRender}
         audioSampleRate={audioSampleRate}
@@ -922,28 +725,6 @@ export default function App() {
         fps={fps}
         waveformLayout={waveformLayout}
       />
-
-      {/* Hidden container for active DOM-mounted video to guarantee browser hardware decode */}
-      {mediaType === 'video' && customVideoUrlRef.current && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            top: -9999,
-            left: -9999,
-            width: 1,
-            height: 1,
-            opacity: 0.001,
-            pointerEvents: 'none',
-            overflow: 'hidden',
-          }}
-          ref={(container) => {
-            if (container && loadedVideo && !container.contains(loadedVideo)) {
-              container.replaceChildren(loadedVideo);
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

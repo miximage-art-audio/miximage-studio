@@ -1,11 +1,11 @@
-import miximageStudioArtwork from '../assets/images/artwork_miximage_studio.jpg';
+import miximageSamplePng from '../assets/images/miximage_logo.png';
 import { DemoArtwork } from './presets';
 
 export const DEMO_ARTWORKS: DemoArtwork[] = [
   {
     id: 'miximage-studio',
-    title: 'MixImage Art & Audio',
-    aspectHint: '16:9',
-    src: miximageStudioArtwork,
+    title: 'MixImage Art & Audio (PNG)',
+    aspectHint: 'PNG · กึ่งกลางทุกขนาด',
+    src: miximageSamplePng,
   },
 ];

@@ -9,8 +9,11 @@ import {
 } from './dsp';
 import {
   ASPECT_RATIOS,
+  AspectRatioKey,
   BASS_INTENSITY_PRESETS,
   COLOR_THEMES,
+  SUPPORTED_AUDIO_EXTENSIONS,
+  SUPPORTED_IMAGE_EXTENSIONS,
   WAVEFORM_STYLES,
   clampWaveformLayout,
   formatTime,
@@ -18,8 +21,6 @@ import {
   getThemeColorMix,
   hexToRgb,
   rgbToHex,
-  SUPPORTED_MEDIA_EXTENSIONS,
-  SUPPORTED_VIDEO_EXTENSIONS,
 } from './presets';
 import { renderStudioFrame } from './renderer';
 import {
@@ -47,38 +48,26 @@ test('ASPECT_RATIOS defines all 7 required 1080p Full HD ratios', () => {
   assert.equal(ASPECT_RATIOS['3:2'].height, 1080);
 });
 
-test('WAVEFORM_STYLES defines 15 non-circular 3D/wave styles, COLOR_THEMES defines 4 themes, and BASS_INTENSITY_PRESETS supports soft values', () => {
-  assert.equal(WAVEFORM_STYLES.length, 15);
+test('WAVEFORM_STYLES defines 20 styles (incl. 5 DJ smooth) and COLOR_THEMES defines 4 classic + 5 two-tone + 5 gradient presets', () => {
+  assert.equal(WAVEFORM_STYLES.length, 20);
+  const djStyles = WAVEFORM_STYLES.filter((s) => s.isDjSmooth);
+  assert.equal(djStyles.length, 5);
+  assert.deepEqual(
+    djStyles.map((s) => s.key),
+    ['dj_dual_deck', 'dj_club_eq', 'dj_liquid_plasma', 'dj_pulse_horizon', 'dj_vinyl_arc']
+  );
+
   assert.deepEqual(
     BASS_INTENSITY_PRESETS.map((p) => p.value),
     [0.0, 0.2, 0.5, 1.0, 1.5, 2.0]
   );
-  assert.deepEqual(
-    WAVEFORM_STYLES.map((s) => s.key),
-    [
-      'bars_3d',
-      'layered_fluid',
-      'dot_halftone',
-      'pixel_grid',
-      'mesh_ribbon',
-      'smooth_osc',
-      'mirror_needles',
-      'silk_aura',
-      'prism_peaks',
-      'brush_spectrum',
-      'harmonic_waves',
-      'dot_mountains',
-      'double_flame',
-      'triple_sine',
-      'seismic_line',
-    ]
-  );
-  assert.deepEqual(Object.keys(COLOR_THEMES), [
-    'cyberpunk',
-    'gold_fire',
-    'ice_blue',
-    'emerald',
-  ]);
+
+  const allThemes = Object.values(COLOR_THEMES);
+  assert.equal(allThemes.filter((t) => t.category === 'classic').length, 4);
+  assert.equal(allThemes.filter((t) => t.category === 'twotone').length, 5);
+  assert.equal(allThemes.filter((t) => t.category === 'gradient').length, 5);
+  assert.equal(allThemes.length, 14);
+
   const mix = getThemeColorMix('cyberpunk');
   assert.equal(mix.c1, '#00F0FF');
   assert.equal(mix.c2, '#8A2BE2');
@@ -90,7 +79,7 @@ test('WAVEFORM_STYLES defines 15 non-circular 3D/wave styles, COLOR_THEMES defin
 test('WaveformLayoutConfig defaults and clamping enforce valid ranges', () => {
   const def = getDefaultWaveformLayout('bars_3d');
   assert.equal(def.posX, 0.5);
-  assert.equal(def.posY, 0.80);
+  assert.equal(def.posY, 0.82);
 
   const clamped = clampWaveformLayout({
     posX: -0.5,
@@ -110,7 +99,6 @@ test('Bass-Sync bandpass (20Hz-150Hz) reacts strongly to 60Hz sub-bass and ignor
   const n = sr * duration;
   const samples = new Float32Array(n);
 
-  // First 1s: 60Hz sub-bass; Second 1s: 4000Hz high tone
   for (let i = 0; i < n; i++) {
     const t = i / sr;
     samples[i] = t < 1.0 ? Math.sin(2 * Math.PI * 60 * t) : Math.sin(2 * Math.PI * 4000 * t);
@@ -120,9 +108,7 @@ test('Bass-Sync bandpass (20Hz-150Hz) reacts strongly to 60Hz sub-bass and ignor
   assert.equal(result.melSpec.length, 64);
   assert.equal(result.bassEnv.length, result.totalFrames);
 
-  // Midpoint of first half (around frame 15) should have high bass energy
   const firstHalfMax = Math.max(...Array.from(result.bassEnv.slice(5, 25)));
-  // End of second half (around frame 50..59) should have decayed low bass energy
   const secondHalfTail = result.bassEnv[result.totalFrames - 2];
 
   assert.ok(firstHalfMax > 0.7, `Expected bass peak > 0.7, got ${firstHalfMax}`);
@@ -163,7 +149,6 @@ test('Onset Flux stays near zero on sustained steady 60Hz bass and spikes on kic
   const duration = 2;
   const n = sr * duration;
   const samples = new Float32Array(n);
-  // First 1s: steady continuous 60Hz bass; 1.2s..1.4s: silence; 1.4s..2.0s: sudden 60Hz hit
   for (let i = 0; i < n; i++) {
     const t = i / sr;
     if (t < 1.0 || t >= 1.4) {
@@ -171,9 +156,7 @@ test('Onset Flux stays near zero on sustained steady 60Hz bass and spikes on kic
     }
   }
   const res = analyzeAudioSamples(samples, sr, 30, 64);
-  // Sustained middle of first second (frames 15..25) should have minimal flux
   const sustainedMax = Math.max(...Array.from(res.bassOnsetFlux.slice(15, 25)));
-  // Sudden onset around t=1.4s (frames 41..46) should spike
   const onsetMax = Math.max(...Array.from(res.bassOnsetFlux.slice(41, 47)));
   assert.ok(sustainedMax < 0.05, `Sustained bass should not trigger shake flux, got ${sustainedMax}`);
   assert.ok(onsetMax > 0.25, `Kick onset should trigger zoom punch flux > 0.25, got ${onsetMax}`);
@@ -189,23 +172,44 @@ test('encodeWav creates valid RIFF/WAVE header', () => {
   assert.equal(wav.length, 44 + samples.length * 2);
 });
 
-test('computeFitGeometry scales 16:9 image into 9:16 cover and blur_pad contain properly', () => {
-  const geom = computeFitGeometry(1920, 1080, 1080, 1920);
-  assert.ok(geom.cover.w >= 1080 && geom.cover.h >= 1920);
-  assert.equal(geom.contain.w, 1080);
-  assert.ok(geom.contain.h < 1920);
-  assert.ok(geom.contain.y > 0);
+test('computeFitGeometry scales PNG proportionally centered across all 7 aspect ratios without overflowing', () => {
+  const srcW = 1024;
+  const srcH = 1024;
+
+  for (const key of Object.keys(ASPECT_RATIOS) as AspectRatioKey[]) {
+    const spec = ASPECT_RATIOS[key];
+    const geom = computeFitGeometry(srcW, srcH, spec.width, spec.height);
+
+    // Center mode: padded neatly inside frame (not huge edge-to-edge) and dead-centered
+    assert.ok(geom.center.w > 0 && geom.center.w < spec.width * 0.7);
+    assert.ok(geom.center.h > 0 && geom.center.h < spec.height * 0.65);
+    assert.equal(geom.center.w, geom.center.h, `1:1 PNG aspect preserved on ${key}`);
+    assert.ok(geom.center.x > 0 && geom.center.y > 0, `Centered with margin on ${key}`);
+    assert.ok(
+      Math.abs(geom.center.x * 2 + geom.center.w - spec.width) <= 2,
+      `Horizontally centered on ${key}`
+    );
+    assert.ok(
+      Math.abs(geom.center.y * 2 + geom.center.h - spec.height) <= 2,
+      `Vertically centered on ${key}`
+    );
+  }
+
+  const rectGeom = computeFitGeometry(1920, 1080, 1080, 1920);
+  assert.ok(rectGeom.cover.w >= 1080 && rectGeom.cover.h >= 1920);
+  assert.equal(rectGeom.contain.w, 1080);
+  assert.ok(rectGeom.contain.h < 1920);
 });
 
-test('Code templates inject studio defaults and 15 styles cleanly into cloud_render.yml', () => {
+test('Code templates inject studio defaults and 20 styles cleanly into cloud_render.yml', () => {
   const reqs = generateRequirementsTxt();
   const py = generateRenderEnginePy();
   const yml = generateCloudRenderYaml({
     ratio: '9:16',
-    style: 'bars_3d',
-    theme: 'gold_fire',
+    style: 'dj_dual_deck',
+    theme: 'tt_crimson_cyan',
     bass: 0.2,
-    fit: 'blur_pad',
+    fit: 'center',
     fps: 60,
     layout: { posX: 0.35, posY: 0.42, scale: 1.35, opacity: 0.75 },
   });
@@ -213,15 +217,16 @@ test('Code templates inject studio defaults and 15 styles cleanly into cloud_ren
   assert.match(reqs, /librosa>=0\.10\.1/);
   assert.match(py, /def apply_bass_transform/);
   assert.match(py, /bars_3d/);
-  assert.match(py, /dot_mountains/);
+  assert.match(py, /dj_dual_deck/);
+  assert.match(py, /dj_vinyl_arc/);
   assert.doesNotMatch(py, /circular_core/);
   assert.match(py, /--pos-x/);
   assert.match(py, /--opacity/);
   assert.match(yml, /default: '9:16'/);
-  assert.match(yml, /default: 'bars_3d'/);
-  assert.match(yml, /default: 'gold_fire'/);
+  assert.match(yml, /default: 'dj_dual_deck'/);
+  assert.match(yml, /default: 'tt_crimson_cyan'/);
   assert.match(yml, /default: '0\.2'/);
-  assert.match(yml, /default: 'blur_pad'/);
+  assert.match(yml, /default: 'center'/);
   assert.match(yml, /default: '60'/);
   assert.match(yml, /default: '0\.35'/);
   assert.match(yml, /default: '0\.42'/);
@@ -231,13 +236,13 @@ test('Code templates inject studio defaults and 15 styles cleanly into cloud_ren
   assert.match(yml, /\.aiff/);
 });
 
-test('Video support defines extensions and formatTime formats correctly', () => {
-  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.mp4'));
-  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.webm'));
-  assert.ok(SUPPORTED_VIDEO_EXTENSIONS.includes('.mov'));
-  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.mp4'));
-  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.jpg'));
-  assert.ok(SUPPORTED_MEDIA_EXTENSIONS.includes('.png'));
+test('Supported extensions restrict uploads to image and audio only (no video) and formatTime works', () => {
+  assert.ok(SUPPORTED_IMAGE_EXTENSIONS.includes('.png'));
+  assert.ok(SUPPORTED_IMAGE_EXTENSIONS.includes('.jpg'));
+  assert.ok(SUPPORTED_AUDIO_EXTENSIONS.includes('.mp3'));
+  assert.ok(SUPPORTED_AUDIO_EXTENSIONS.includes('.wav'));
+  assert.ok(!SUPPORTED_IMAGE_EXTENSIONS.includes('.mp4'));
+  assert.ok(!SUPPORTED_AUDIO_EXTENSIONS.includes('.mp4'));
 
   assert.equal(formatTime(0), '00:00');
   assert.equal(formatTime(15), '00:15');
@@ -245,7 +250,7 @@ test('Video support defines extensions and formatTime formats correctly', () => 
   assert.equal(formatTime(3665), '61:05');
 });
 
-test('renderStudioFrame executes without errors across all 15 styles', () => {
+test('renderStudioFrame executes without errors across all 20 styles (including 5 DJ smooth)', () => {
   const createMockCanvas = () => {
     const ctx = {
       save: () => {},
@@ -305,43 +310,41 @@ test('renderStudioFrame executes without errors across all 15 styles', () => {
         style.key,
         'cyberpunk',
         1.0,
-        0,
+        12,
         getDefaultWaveformLayout(style.key),
         0.5
       );
     }, `renderStudioFrame threw on style ${style.key}`);
   }
 
-  // Test toggle: showWaveform = false (skips waveform rendering completely)
   assert.doesNotThrow(() => {
     renderStudioFrame(
       targetCanvas.getContext('2d') as any,
       surface as any,
       specCol,
       0.8,
-      'bars_3d',
-      'cyberpunk',
+      'dj_dual_deck',
+      'gr_sunset_synth',
       1.0,
       0,
-      getDefaultWaveformLayout('bars_3d'),
+      getDefaultWaveformLayout('dj_dual_deck'),
       0.8,
       undefined,
-      false // showWaveform = false
+      false
     );
   }, 'renderStudioFrame failed when showWaveform is false');
 
-  // Test toggle: bassIntensity = 0.0 (static background, no bounce or bloom)
   assert.doesNotThrow(() => {
     renderStudioFrame(
       targetCanvas.getContext('2d') as any,
       surface as any,
       specCol,
       0.9,
-      'bars_3d',
-      'cyberpunk',
-      0.0, // bassIntensity = 0.0 (no bounce)
+      'dj_liquid_plasma',
+      'tt_gold_violet',
+      0.0,
       0,
-      getDefaultWaveformLayout('bars_3d'),
+      getDefaultWaveformLayout('dj_liquid_plasma'),
       0.9,
       undefined,
       true
@@ -349,38 +352,18 @@ test('renderStudioFrame executes without errors across all 15 styles', () => {
   }, 'renderStudioFrame failed when bassIntensity is 0.0');
 });
 
-test('duration resolution defaults to full song length and loops background video seamlessly', () => {
-  const songDuration = 215.5; // 3m 35s
-  const videoDuration = 10.0; // 10s short clip
-
-  // 1. App duration logic
-  const maxAvailableDuration = Math.max(songDuration, videoDuration);
-  assert.equal(maxAvailableDuration, 215.5);
-
-  // Default effective duration without custom cut is the full song
+test('duration resolution defaults to full song length and supports manual adjustments', () => {
+  const songDuration = 215.5;
   const customDuration: number | null = null;
   const effectiveDuration =
     customDuration !== null && customDuration > 0
-      ? Math.max(0.5, Math.min(customDuration, maxAvailableDuration))
+      ? Math.max(0.5, Math.min(customDuration, songDuration))
       : Math.max(0.5, songDuration);
   assert.equal(effectiveDuration, 215.5);
 
-  // 2. Video modulo looping at arbitrary seconds into the song
-  const trimStartSec = 2.0;
-  const vDur = videoDuration;
-  const calcVTime = (sec: number) => (vDur > 0 ? (trimStartSec + sec) % vDur : 0);
-
-  assert.equal(calcVTime(0), 2.0);
-  assert.equal(calcVTime(8.0), 0.0); // 10 % 10 = 0
-  assert.equal(calcVTime(15.5), 7.5); // 17.5 % 10 = 7.5
-  assert.equal(calcVTime(215.5), 7.5); // (2 + 215.5) = 217.5 % 10 = 7.5
-
-  // 3. Custom duration preset clamping
   const shortsDuration = 15.0;
-  const clampedShorts = Math.max(0.5, Math.min(shortsDuration, maxAvailableDuration));
-  assert.equal(clampedShorts, 15.0);
+  assert.equal(Math.max(0.5, Math.min(shortsDuration, songDuration)), 15.0);
 
   const overflowDuration = 999.0;
-  const clampedOverflow = Math.max(0.5, Math.min(overflowDuration, maxAvailableDuration));
-  assert.equal(clampedOverflow, 215.5);
+  assert.equal(Math.max(0.5, Math.min(overflowDuration, songDuration)), 215.5);
 });

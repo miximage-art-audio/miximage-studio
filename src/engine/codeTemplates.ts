@@ -48,10 +48,20 @@ ASPECT_RATIOS = {
 
 # ชุดโทนสีสำหรับคลื่นเสียง (ระบบสี BGR ของ OpenCV)
 COLOR_THEMES = {
-    "cyberpunk": ((255, 240, 0), (255, 0, 180)),   # ฟ้าไซแอน ไล่เฉดไป ชมพูมาเจนตา
-    "gold_fire": ((0, 215, 255), (0, 60, 255)),    # สีทองคำ ไล่เฉดไป ส้มเพลิง
-    "ice_blue": ((255, 255, 180), (255, 100, 0)),  # ขาวไอซ์บลู ไล่เฉดไป น้ำเงินเข้ม
-    "emerald": ((150, 255, 0), (0, 180, 80)),      # เขียวนีออน ไล่เฉดไป เขียวมรกต
+    "cyberpunk": ((255, 240, 0), (255, 0, 180)),          # ฟ้าไซแอน - ชมพูมาเจนตา
+    "gold_fire": ((0, 215, 255), (0, 60, 255)),           # ทองคำ - ส้มเพลิง
+    "ice_blue": ((255, 255, 180), (255, 100, 0)),         # ไอซ์บลู - น้ำเงินเข้ม
+    "emerald": ((150, 255, 0), (0, 180, 80)),             # เขียวนีออน - มรกต
+    "tt_crimson_cyan": ((86, 30, 255), (255, 229, 0)),    # ทูโทน แดง-ฟ้า
+    "tt_gold_violet": ((0, 208, 255), (246, 92, 139)),    # ทูโทน ทอง-ม่วง
+    "tt_pink_lime": ((147, 46, 255), (18, 255, 163)),     # ทูโทน ชมพู-มะนาว
+    "tt_white_cobalt": ((252, 250, 248), (235, 99, 37)),  # ทูโทน ขาว-น้ำเงิน
+    "tt_orange_teal": ((0, 107, 255), (166, 184, 20)),    # ทูโทน ส้ม-เทอร์ควอยซ์
+    "gr_sunset_synth": ((11, 190, 255), (110, 0, 255)),   # ไล่เฉด Sunset Synth
+    "gr_aurora_dream": ((212, 245, 0), (229, 93, 155)),   # ไล่เฉด Aurora Dream
+    "gr_tropical_prism": ((94, 89, 255), (38, 201, 138)), # ไล่เฉด Tropical Prism
+    "gr_midnight_velvet": ((248, 189, 56), (249, 121, 232)), # ไล่เฉด Midnight Velvet
+    "gr_lava_magma": ((176, 243, 255), (40, 40, 214)),    # ไล่เฉด Lava Magma
 }
 
 ALL_WAVEFORM_STYLES = [
@@ -70,6 +80,11 @@ ALL_WAVEFORM_STYLES = [
     "double_flame",
     "triple_sine",
     "seismic_line",
+    "dj_dual_deck",
+    "dj_club_eq",
+    "dj_liquid_plasma",
+    "dj_pulse_horizon",
+    "dj_vinyl_arc",
 ]
 
 
@@ -132,16 +147,31 @@ def analyze_audio(wav_path, fps, n_bars=64):
     return bass_env, onset_flux, mel_norm, len(bass_env)
 
 
-def prepare_base_image(img_path, target_w, target_h, fit_mode="cover"):
+def prepare_base_image(img_path, target_w, target_h, fit_mode="center"):
     """
     ปรับขนาดและจัดวางรูปภาพต้นฉบับให้ตรงกับอัตราส่วนที่เลือก
-    รองรับทั้งโหมด cover (เต็มกรอบ) และ blur_pad (พื้นหลังเบลอ + ภาพเต็มใบ)
+    รองรับโหมด center (วางกึ่งกลางพอดี), cover (เต็มกรอบ) และ blur_pad (พื้นหลังเบลอ + ภาพเต็มใบ)
     """
-    img = cv2.imread(img_path)
+    img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise FileNotFoundError(f"ไม่พบไฟล์รูปภาพที่ระบุ: {img_path}")
 
+    if img.shape[2] == 4:
+        alpha = img[:, :, 3:4].astype(np.float32) / 255.0
+        bg_dark = np.full((img.shape[0], img.shape[1], 3), (22, 13, 9), dtype=np.float32)
+        bgr = (img[:, :, :3].astype(np.float32) * alpha + bg_dark * (1.0 - alpha)).astype(np.uint8)
+        img = bgr
+
     ih, iw = img.shape[:2]
+    if fit_mode == "center":
+        canvas = np.full((target_h, target_w, 3), (22, 13, 9), dtype=np.uint8)
+        scale_center = min((target_w * 0.64) / iw, (target_h * 0.56) / ih)
+        cw, ch = max(1, int(iw * scale_center)), max(1, int(ih * scale_center))
+        fg = cv2.resize(img, (cw, ch), interpolation=cv2.INTER_LANCZOS4)
+        px, py = (target_w - cw) // 2, (target_h - ch) // 2
+        canvas[py:py + ch, px:px + cw] = fg
+        return canvas
+
     scale_cover = max(target_w / iw, target_h / ih)
     nw, nh = int(iw * scale_cover), int(ih * scale_cover)
     bg = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LANCZOS4)
@@ -334,7 +364,7 @@ def main():
     parser.add_argument("--style", default="bars_3d", choices=ALL_WAVEFORM_STYLES, help="รูปแบบคลื่นเสียง")
     parser.add_argument("--theme", default="cyberpunk", choices=list(COLOR_THEMES.keys()), help="โทนสีคลื่นเสียง")
     parser.add_argument("--bass", type=float, default=1.0, help="ความแรงการกระตุกตามเบส")
-    parser.add_argument("--fit", default="cover", choices=["cover", "blur_pad"], help="โหมดการจัดวางภาพ")
+    parser.add_argument("--fit", default="center", choices=["center", "cover", "blur_pad"], help="โหมดการจัดวางภาพ")
     parser.add_argument("--fps", type=int, default=30, help="จำนวนเฟรมต่อวินาที")
     parser.add_argument("--pos-x", type=float, default=0.50, help="ตำแหน่งแนวนอนคลื่นเสียง (0.10 - 0.90)")
     parser.add_argument("--pos-y", type=float, default=0.80, help="ตำแหน่งแนวตั้งคลื่นเสียง (0.10 - 0.90)")
@@ -418,7 +448,7 @@ on:
           - '16:9'
           - '9:16'
       waveform_style:
-        description: '2. เลือกรูปแบบคลื่นเสียง (15 สไตล์)'
+        description: '2. เลือกรูปแบบคลื่นเสียง (20 สไตล์)'
         required: true
         default: '${defaults.style}'
         type: choice
@@ -438,6 +468,11 @@ on:
           - 'double_flame'
           - 'triple_sine'
           - 'seismic_line'
+          - 'dj_dual_deck'
+          - 'dj_club_eq'
+          - 'dj_liquid_plasma'
+          - 'dj_pulse_horizon'
+          - 'dj_vinyl_arc'
       color_theme:
         description: '3. เลือกโทนสีคลื่นเสียง'
         required: true
@@ -448,6 +483,16 @@ on:
           - 'gold_fire'
           - 'ice_blue'
           - 'emerald'
+          - 'tt_crimson_cyan'
+          - 'tt_gold_violet'
+          - 'tt_pink_lime'
+          - 'tt_white_cobalt'
+          - 'tt_orange_teal'
+          - 'gr_sunset_synth'
+          - 'gr_aurora_dream'
+          - 'gr_tropical_prism'
+          - 'gr_midnight_velvet'
+          - 'gr_lava_magma'
       bass_intensity:
         description: '4. เลือกความแรงภาพกระตุกตามเบส (0.0 = ปิด, 0.2 = เบามาก, 0.5 = เบา, 1.0 = มาตรฐาน)'
         required: true
@@ -468,6 +513,7 @@ on:
         default: '${defaults.fit}'
         type: choice
         options:
+          - 'center'
           - 'cover'
           - 'blur_pad'
       fps:

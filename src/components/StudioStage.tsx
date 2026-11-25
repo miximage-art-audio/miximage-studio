@@ -188,7 +188,14 @@ export const StudioStage: React.FC<StudioStageProps> = ({
           <span aria-hidden="true">·</span>
           <span className="font-mono tabular-nums">{fps} FPS</span>
           <span aria-hidden="true">·</span>
-          <span>โหมด {fitMode === 'cover' ? 'Cover เต็มกรอบ' : 'Blur Pad ภาพเต็มใบ'}</span>
+          <span>
+            โหมด{' '}
+            {fitMode === 'center'
+              ? 'วางกึ่งกลางพอดี'
+              : fitMode === 'cover'
+                ? 'Cover เต็มกรอบ'
+                : 'Blur Pad ภาพเต็มใบ'}
+          </span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -248,8 +255,8 @@ export const StudioStage: React.FC<StudioStageProps> = ({
         </div>
 
         {showWaveform === false ? (
-          <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded px-2.5 py-1 shrink-0 flex items-center justify-between">
-            <span>✕ ปิดคลื่นเสียงอยู่ (เน้นเฉพาะภาพพื้นหลัง/วิดีโอ)</span>
+          <div className="text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/30 rounded px-2.5 py-1 shrink-0 flex items-center justify-between gap-2">
+            <span>✕ ปิดคลื่นเสียงอยู่ (เน้นเฉพาะภาพพื้นหลัง)</span>
             <span className="font-mono text-slate-400">
               กระตุกตามเบส: {bassIntensity > 0 ? `${bassIntensity.toFixed(1)}x` : 'ปิดสั่น'}
             </span>

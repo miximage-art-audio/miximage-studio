@@ -151,7 +151,7 @@ export const ArchitectureGuideView: React.FC<ArchitectureGuideViewProps> = ({
             แบบ Additive Blending 2 ชั้นเพื่อให้เกิดแสงฟุ้งเรืองแสงระดับสตูดิโอ
           </p>
           <p className="text-xs text-slate-400">
-            เลือกได้ 15 สไตล์ (แท่ง 3D อีควอ และคลื่นแนวนอนหลากรูปแบบ) และ 4 โทนสี
+            เลือกได้ 20 สไตล์ (รวมคลื่น DJ เคลื่อนไหวนุ่มลื่น 5 แบบ) และ 14 โทนสี (หลัก + ทูโทน + ไล่เฉด)
           </p>
         </article>
       </div>
@@ -163,7 +163,8 @@ export const ArchitectureGuideView: React.FC<ArchitectureGuideViewProps> = ({
             ตารางขนาดภาพ 7 อัตราส่วนมาตรฐาน Full HD (1080p Base)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            รองรับโหมด <span className="font-mono text-slate-200">cover</span> (ขยายเต็มกรอบจากจุดกึ่งกลาง)
+            รองรับโหมด <span className="font-mono text-slate-200">center</span> (วางกึ่งกลางพอดีทุกขนาด),{' '}
+            <span className="font-mono text-slate-200">cover</span> (ขยายเต็มกรอบจากจุดกึ่งกลาง)
             และ <span className="font-mono text-slate-200">blur_pad</span> (พื้นหลังเบลอลดสว่าง 55% + ภาพเต็มใบตรงกลาง)
           </p>
         </div>

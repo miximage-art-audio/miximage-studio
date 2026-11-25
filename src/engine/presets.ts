@@ -14,9 +14,32 @@ export type WaveformStyle =
   | 'dot_mountains'
   | 'double_flame'
   | 'triple_sine'
-  | 'seismic_line';
-export type ColorThemeKey = 'cyberpunk' | 'gold_fire' | 'ice_blue' | 'emerald';
-export type FitMode = 'cover' | 'blur_pad';
+  | 'seismic_line'
+  | 'dj_dual_deck'
+  | 'dj_club_eq'
+  | 'dj_liquid_plasma'
+  | 'dj_pulse_horizon'
+  | 'dj_vinyl_arc';
+
+export type ColorThemeCategory = 'classic' | 'twotone' | 'gradient';
+
+export type ColorThemeKey =
+  | 'cyberpunk'
+  | 'gold_fire'
+  | 'ice_blue'
+  | 'emerald'
+  | 'tt_crimson_cyan'
+  | 'tt_gold_violet'
+  | 'tt_pink_lime'
+  | 'tt_white_cobalt'
+  | 'tt_orange_teal'
+  | 'gr_sunset_synth'
+  | 'gr_aurora_dream'
+  | 'gr_tropical_prism'
+  | 'gr_midnight_velvet'
+  | 'gr_lava_magma';
+
+export type FitMode = 'cover' | 'blur_pad' | 'center';
 export type FpsOption = 30 | 60;
 
 export interface WaveformLayoutConfig {
@@ -29,7 +52,7 @@ export interface WaveformLayoutConfig {
 export function getDefaultWaveformLayout(_style?: WaveformStyle): WaveformLayoutConfig {
   return {
     posX: 0.5,
-    posY: 0.80,
+    posY: 0.82,
     scale: 1.0,
     opacity: 1.0,
   };
@@ -144,6 +167,7 @@ export function rgbToHex(rgb: [number, number, number]): string {
 
 export interface ColorThemeSpec {
   key: ColorThemeKey;
+  category: ColorThemeCategory;
   label: string;
   description: string;
   c1Rgb: [number, number, number];
@@ -154,8 +178,10 @@ export interface ColorThemeSpec {
 }
 
 export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
+  // 1. Classic Themes (4)
   cyberpunk: {
     key: 'cyberpunk',
+    category: 'classic',
     label: 'Cyberpunk',
     description: 'ฟ้าไซแอน — ม่วงนีออน — ชมพูมาเจนตา',
     c1Rgb: [0, 240, 255],
@@ -166,6 +192,7 @@ export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
   },
   gold_fire: {
     key: 'gold_fire',
+    category: 'classic',
     label: 'Gold Fire',
     description: 'ทองคำ — ส้มอำพัน — แดงเพลิง',
     c1Rgb: [255, 215, 0],
@@ -176,6 +203,7 @@ export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
   },
   ice_blue: {
     key: 'ice_blue',
+    category: 'classic',
     label: 'Ice Blue',
     description: 'ขาวไอซ์บลู — ฟ้าอาร์กติก — น้ำเงินเข้ม',
     c1Rgb: [180, 255, 255],
@@ -186,6 +214,7 @@ export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
   },
   emerald: {
     key: 'emerald',
+    category: 'classic',
     label: 'Emerald',
     description: 'เขียวนีออน — เขียวมรกต — ฟ้าเทอร์ควอยซ์',
     c1Rgb: [0, 255, 150],
@@ -193,6 +222,120 @@ export const COLOR_THEMES: Record<ColorThemeKey, ColorThemeSpec> = {
     c2Rgb: [6, 182, 212],
     c1Bgr: [150, 255, 0],
     c2Bgr: [212, 182, 6],
+  },
+
+  // 2. Two-Tone Presets (5 เฉดทูโทน)
+  tt_crimson_cyan: {
+    key: 'tt_crimson_cyan',
+    category: 'twotone',
+    label: 'แดง-ฟ้า',
+    description: 'ทูโทน: ชมพูแดงเข้มตัดฟ้าไซแอน',
+    c1Rgb: [255, 30, 86],
+    cMidRgb: [240, 48, 108],
+    c2Rgb: [0, 229, 255],
+    c1Bgr: [86, 30, 255],
+    c2Bgr: [255, 229, 0],
+  },
+  tt_gold_violet: {
+    key: 'tt_gold_violet',
+    category: 'twotone',
+    label: 'ทอง-ม่วง',
+    description: 'ทูโทน: เหลืองทองคำตัดม่วงรอยัล',
+    c1Rgb: [255, 208, 0],
+    cMidRgb: [245, 185, 35],
+    c2Rgb: [139, 92, 246],
+    c1Bgr: [0, 208, 255],
+    c2Bgr: [246, 92, 139],
+  },
+  tt_pink_lime: {
+    key: 'tt_pink_lime',
+    category: 'twotone',
+    label: 'ชมพู-มะนาว',
+    description: 'ทูโทน: ชมพูนีออนตัดเขียวมะนาว',
+    c1Rgb: [255, 46, 147],
+    cMidRgb: [242, 65, 145],
+    c2Rgb: [163, 255, 18],
+    c1Bgr: [147, 46, 255],
+    c2Bgr: [18, 255, 163],
+  },
+  tt_white_cobalt: {
+    key: 'tt_white_cobalt',
+    category: 'twotone',
+    label: 'ขาว-น้ำเงิน',
+    description: 'ทูโทน: ขาวสว่างตัดน้ำเงินโคบอลต์',
+    c1Rgb: [248, 250, 252],
+    cMidRgb: [218, 232, 250],
+    c2Rgb: [37, 99, 235],
+    c1Bgr: [252, 250, 248],
+    c2Bgr: [235, 99, 37],
+  },
+  tt_orange_teal: {
+    key: 'tt_orange_teal',
+    category: 'twotone',
+    label: 'ส้ม-เทอร์ควอยซ์',
+    description: 'ทูโทน: ส้มสดตัดเขียวน้ำทะเล',
+    c1Rgb: [255, 107, 0],
+    cMidRgb: [242, 122, 32],
+    c2Rgb: [20, 184, 166],
+    c1Bgr: [0, 107, 255],
+    c2Bgr: [166, 184, 20],
+  },
+
+  // 3. Gradient Presets (5 เฉดไล่เฉด)
+  gr_sunset_synth: {
+    key: 'gr_sunset_synth',
+    category: 'gradient',
+    label: 'Sunset Synth',
+    description: 'ไล่เฉด: เหลืองอำพัน — ส้มนีออน — ชมพูมาเจนตา',
+    c1Rgb: [255, 190, 11],
+    cMidRgb: [251, 86, 7],
+    c2Rgb: [255, 0, 110],
+    c1Bgr: [11, 190, 255],
+    c2Bgr: [110, 0, 255],
+  },
+  gr_aurora_dream: {
+    key: 'gr_aurora_dream',
+    category: 'gradient',
+    label: 'Aurora Dream',
+    description: 'ไล่เฉด: เขียวมิ้นต์ — ฟ้าคริสตัล — ม่วงลาเวนเดอร์',
+    c1Rgb: [0, 245, 212],
+    cMidRgb: [0, 187, 249],
+    c2Rgb: [155, 93, 229],
+    c1Bgr: [212, 245, 0],
+    c2Bgr: [229, 93, 155],
+  },
+  gr_tropical_prism: {
+    key: 'gr_tropical_prism',
+    category: 'gradient',
+    label: 'Tropical Prism',
+    description: 'ไล่เฉด: ปะการัง — เหลืองทอง — เขียวสดใส',
+    c1Rgb: [255, 89, 94],
+    cMidRgb: [255, 202, 58],
+    c2Rgb: [138, 201, 38],
+    c1Bgr: [94, 89, 255],
+    c2Bgr: [38, 201, 138],
+  },
+  gr_midnight_velvet: {
+    key: 'gr_midnight_velvet',
+    category: 'gradient',
+    label: 'Midnight Velvet',
+    description: 'ไล่เฉด: ฟ้าสกาย — คราม — ม่วงชมพูพาสเทล',
+    c1Rgb: [56, 189, 248],
+    cMidRgb: [129, 140, 248],
+    c2Rgb: [232, 121, 249],
+    c1Bgr: [248, 189, 56],
+    c2Bgr: [249, 121, 232],
+  },
+  gr_lava_magma: {
+    key: 'gr_lava_magma',
+    category: 'gradient',
+    label: 'Lava Magma',
+    description: 'ไล่เฉด: เหลืองแกนร้อน — ส้มลาวา — แดงเพลิงเข้ม',
+    c1Rgb: [255, 243, 176],
+    cMidRgb: [247, 127, 0],
+    c2Rgb: [214, 40, 40],
+    c1Bgr: [176, 243, 255],
+    c2Bgr: [40, 40, 214],
   },
 };
 
@@ -209,6 +352,7 @@ export const WAVEFORM_STYLES: Array<{
   key: WaveformStyle;
   label: string;
   description: string;
+  isDjSmooth?: boolean;
 }> = [
   {
     key: 'bars_3d',
@@ -285,6 +429,37 @@ export const WAVEFORM_STYLES: Array<{
     label: 'อีควอขีดลอยสะท้อน',
     description: 'แท่งสเปกตรัมพร้อมขีดยอดลอยตัวและเงาสะท้อนน้ำด้านล่าง',
   },
+  // 5 New Smooth DJ Waveforms
+  {
+    key: 'dj_dual_deck',
+    label: 'DJ คลื่นคู่สเตอริโอ',
+    description: 'คลื่นเสียงสไตล์เด็ค DJ คู่บน-ล่าง เคลื่อนไหวสมูทลื่นไหลแบบมิกเซอร์',
+    isDjSmooth: true,
+  },
+  {
+    key: 'dj_club_eq',
+    label: 'DJ อีควอคลับนุ่ม',
+    description: 'แท่งอีควอไลเซอร์ปลายมนพร้อมจุดแสงยอดลอยนุ่มนวลสไตล์บูธ DJ',
+    isDjSmooth: true,
+  },
+  {
+    key: 'dj_liquid_plasma',
+    label: 'DJ พลาสมาไหลลื่น',
+    description: 'ม่านคลื่นพลาสมา 3 ชั้นซ้อนสมมาตร เคลื่อนไหวพลิ้วไหวไร้รอยหยัก',
+    isDjSmooth: true,
+  },
+  {
+    key: 'dj_pulse_horizon',
+    label: 'DJ ขอบฟ้าซับเบส',
+    description: 'เส้นแสงขอบฟ้าซับเบสพองตัวนุ่มนวลพร้อมเงาสะท้อนน้ำเรืองแสง',
+    isDjSmooth: true,
+  },
+  {
+    key: 'dj_vinyl_arc',
+    label: 'DJ ริบบิ้นโค้งนุ่ม',
+    description: 'ริบบิ้นเสียงสเตอริโอพาดโค้งนุ่มนวลพร้อมเม็ดแสงนำจังหวะ',
+    isDjSmooth: true,
+  },
 ];
 
 export const FIT_MODES: Array<{
@@ -292,6 +467,11 @@ export const FIT_MODES: Array<{
   label: string;
   description: string;
 }> = [
+  {
+    key: 'center',
+    label: 'วางกึ่งกลางพอดี',
+    description: 'จัดวางภาพกึ่งกลางพอดีทุกสัดส่วน ไม่ล้นเต็มกรอบ (เหมาะกับโลโก้ PNG)',
+  },
   {
     key: 'cover',
     label: 'Cover เต็มกรอบ',
@@ -338,20 +518,6 @@ export const SUPPORTED_IMAGE_EXTENSIONS = [
   '.png',
   '.webp',
   '.bmp',
-];
-
-export const SUPPORTED_VIDEO_EXTENSIONS = [
-  '.mp4',
-  '.webm',
-  '.mov',
-  '.mkv',
-  '.m4v',
-  '.avi',
-];
-
-export const SUPPORTED_MEDIA_EXTENSIONS = [
-  ...SUPPORTED_IMAGE_EXTENSIONS,
-  ...SUPPORTED_VIDEO_EXTENSIONS,
 ];
 
 export interface DemoArtwork {

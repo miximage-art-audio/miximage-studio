@@ -51,8 +51,8 @@ function sampleColor3(
 }
 
 /**
- * Updates the base canvas background with a new frame from an image, video, or canvas,
- * implementing both `cover` and `blur_pad` modes.
+ * Updates the base canvas background with an image or canvas,
+ * implementing `center`, `cover`, and `blur_pad` modes.
  */
 export function updateRenderSurfaceBase(
   surface: RenderSurface,
@@ -69,10 +69,38 @@ export function updateRenderSurfaceBase(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  if (fitMode === 'cover') {
+  // Studio dark radial backdrop ensures transparent PNG artwork renders with rich depth
+  const drawDarkBackdrop = () => {
+    const bgGrad = ctx.createRadialGradient(
+      targetW * 0.5,
+      targetH * 0.48,
+      Math.min(targetW, targetH) * 0.05,
+      targetW * 0.5,
+      targetH * 0.5,
+      Math.max(targetW, targetH) * 0.72
+    );
+    bgGrad.addColorStop(0, '#131C33');
+    bgGrad.addColorStop(0.55, '#090D16');
+    bgGrad.addColorStop(1, '#050810');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, targetW, targetH);
+  };
+
+  if (fitMode === 'center') {
+    drawDarkBackdrop();
+    ctx.drawImage(
+      source,
+      geom.center.x,
+      geom.center.y,
+      geom.center.w,
+      geom.center.h
+    );
+  } else if (fitMode === 'cover') {
+    drawDarkBackdrop();
     ctx.drawImage(source, geom.cover.x, geom.cover.y, geom.cover.w, geom.cover.h);
   } else {
     // blur_pad: Gaussian blurred cover background dimmed by 55% (0.45 brightness) + centered full image
+    drawDarkBackdrop();
     const blurScale = Math.max(12, Math.round(Math.min(targetW, targetH) * 0.032));
     ctx.save();
     ctx.filter = `blur(${blurScale}px) brightness(0.45)`;
@@ -100,10 +128,10 @@ export function updateRenderSurfaceBase(
 }
 
 /**
- * Prepares the offscreen base canvas implementing both `cover` and `blur_pad` modes.
+ * Prepares the offscreen base canvas implementing `center`, `cover`, and `blur_pad` modes.
  */
 export function createRenderSurface(
-  img: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+  img: HTMLImageElement | HTMLCanvasElement,
   targetW: number,
   targetH: number,
   fitMode: FitMode
@@ -121,8 +149,8 @@ export function createRenderSurface(
   glowCanvas.height = Math.max(96, Math.round(targetH / 4));
 
   const workCanvas = document.createElement('canvas');
-  workCanvas.width = targetW;
-  workCanvas.height = targetH;
+  workCanvas.width = Math.max(96, Math.round(targetW / 2));
+  workCanvas.height = Math.max(96, Math.round(targetH / 2));
 
   const surface: RenderSurface = {
     baseCanvas,
@@ -134,12 +162,10 @@ export function createRenderSurface(
   };
 
   const srcW =
-    ('videoWidth' in img && img.videoWidth ? img.videoWidth : 0) ||
     ('naturalWidth' in img && img.naturalWidth ? img.naturalWidth : 0) ||
     img.width ||
     targetW;
   const srcH =
-    ('videoHeight' in img && img.videoHeight ? img.videoHeight : 0) ||
     ('naturalHeight' in img && img.naturalHeight ? img.naturalHeight : 0) ||
     img.height ||
     targetH;
@@ -868,6 +894,266 @@ export function renderStudioFrame(
     // Continuous glowing horizontal center line across the full span
     oCtx.fillStyle = makeSpanGrad(0.98);
     oCtx.fillRect(xStart, -lineThickness / 2, spanW, lineThickness);
+  } else if (style === 'dj_dual_deck') {
+    // 16. DJ Stereo Dual-Deck Fluid Waveform (Rekordbox/Serato-inspired smooth stereo mirror waves)
+    const pts = 84;
+    const maxAmp = h * 0.155;
+    const phase = framePhase * 0.045;
+    const topDeck: Array<[number, number]> = [];
+    const botDeck: Array<[number, number]> = [];
+
+    for (let i = 0; i < pts; i++) {
+      const u = i / (pts - 1);
+      const x = xStart + u * spanW;
+      const val = sampleMusicalSpec(specCol, u, true);
+      const waveMotion = 0.84 + 0.16 * Math.sin(u * Math.PI * 3.0 - phase);
+      const amp = Math.pow(val, 1.04) * maxAmp * taperEnvelope(u) * waveMotion;
+      topDeck.push([x, -amp]);
+      botDeck.push([x, amp * 0.86]);
+    }
+
+    // Upper stereo deck translucent gradient fill
+    const topFill = oCtx.createLinearGradient(0, -maxAmp, 0, 0);
+    topFill.addColorStop(0, rgbStr(c1, 0.72));
+    topFill.addColorStop(1, rgbStr(cMid, 0.14));
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    drawSmoothCurve(oCtx, topDeck);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.closePath();
+    oCtx.fillStyle = topFill;
+    oCtx.fill();
+
+    // Lower stereo deck translucent gradient fill
+    const botFill = oCtx.createLinearGradient(0, 0, 0, maxAmp);
+    botFill.addColorStop(0, rgbStr(cMid, 0.14));
+    botFill.addColorStop(1, rgbStr(c2, 0.68));
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    drawSmoothCurve(oCtx, botDeck);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.closePath();
+    oCtx.fillStyle = botFill;
+    oCtx.fill();
+
+    // Silky glowing outer contour strokes
+    oCtx.lineCap = 'round';
+    oCtx.lineJoin = 'round';
+    oCtx.lineWidth = Math.max(2.2, 3.4 * scaleFactor);
+    oCtx.strokeStyle = makeSpanGrad(0.95);
+    oCtx.beginPath();
+    drawSmoothCurve(oCtx, topDeck);
+    oCtx.stroke();
+
+    oCtx.lineWidth = Math.max(1.8, 2.8 * scaleFactor);
+    oCtx.strokeStyle = makeSpanGrad(0.82);
+    oCtx.beginPath();
+    drawSmoothCurve(oCtx, botDeck);
+    oCtx.stroke();
+
+    // Crisp luminous center cue rail
+    oCtx.strokeStyle = rgbStr(lerpColor(cMid, [255, 255, 255], 0.55), 0.9);
+    oCtx.lineWidth = Math.max(1.4, 2.0 * scaleFactor);
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.stroke();
+  } else if (style === 'dj_club_eq') {
+    // 17. DJ Smooth Velvet Club Equalizer with Floating Luminous Peak Orbs
+    const count = 28;
+    const step = spanW / count;
+    const barW = Math.max(6 * scaleFactor, step * 0.54);
+    const maxBarH = h * 0.175;
+    const baseY = maxBarH * 0.25;
+    oCtx.lineCap = 'round';
+
+    for (let i = 0; i < count; i++) {
+      const u = i / (count - 1);
+      const val = sampleMusicalSpec(specCol, u, true);
+      const col = sampleColor3(c1, cMid, c2, u);
+      const hiCol = lerpColor(col, [255, 255, 255], 0.48);
+      const bh = Math.max(barW * 0.65, Math.pow(val, 1.04) * maxBarH * taperEnvelope(u));
+      const x = xStart + (i + 0.5) * step;
+      const yTop = baseY - bh;
+
+      // Soft bottom reflection fade
+      const reflGrad = oCtx.createLinearGradient(x, baseY, x, baseY + bh * 0.38);
+      reflGrad.addColorStop(0, rgbStr(col, 0.34));
+      reflGrad.addColorStop(1, rgbStr(col, 0));
+      oCtx.strokeStyle = reflGrad;
+      oCtx.lineWidth = barW;
+      oCtx.beginPath();
+      oCtx.moveTo(x, baseY + 3 * scaleFactor);
+      oCtx.lineTo(x, baseY + bh * 0.38);
+      oCtx.stroke();
+
+      // Main silky rounded bar
+      const vGrad = oCtx.createLinearGradient(x, yTop, x, baseY);
+      vGrad.addColorStop(0, rgbStr(hiCol, 0.98));
+      vGrad.addColorStop(0.45, rgbStr(col, 0.92));
+      vGrad.addColorStop(1, rgbStr(lerpColor(col, [10, 15, 30], 0.35), 0.72));
+      oCtx.strokeStyle = vGrad;
+      oCtx.lineWidth = barW;
+      oCtx.beginPath();
+      oCtx.moveTo(x, baseY);
+      oCtx.lineTo(x, yTop);
+      oCtx.stroke();
+
+      // Floating glowing orb above each column
+      const orbGap = Math.max(6 * scaleFactor, (7 + val * 12) * scaleFactor);
+      const orbR = Math.max(2.0, barW * 0.32);
+      oCtx.fillStyle = rgbStr(hiCol, 0.92);
+      oCtx.beginPath();
+      oCtx.arc(x, yTop - orbGap, orbR, 0, Math.PI * 2);
+      oCtx.fill();
+    }
+  } else if (style === 'dj_liquid_plasma') {
+    // 18. DJ Liquid Plasma Silk Waves (3 smooth gliding translucent layers)
+    const pts = 76;
+    const maxAmp = h * 0.165;
+    const phase = framePhase * 0.038;
+    const layers = [
+      { speed: 1.0, freq: 2.6, shift: 0.0, bandShift: 0.0, col: c1, alpha: 0.32, strokeA: 0.92 },
+      { speed: -0.75, freq: 3.4, shift: 1.6, bandShift: 0.25, col: cMid, alpha: 0.28, strokeA: 0.88 },
+      { speed: 0.6, freq: 4.2, shift: 3.2, bandShift: 0.5, col: c2, alpha: 0.24, strokeA: 0.9 },
+    ];
+
+    for (const lyr of layers) {
+      const topPts: Array<[number, number]> = [];
+      const botPts: Array<[number, number]> = [];
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const bandU = Math.min(0.95, Math.abs(u - 0.5) * 1.1 + lyr.bandShift);
+        const val = sampleSpec(specCol, bandU);
+        const swell = 0.72 + 0.28 * Math.sin(u * Math.PI * lyr.freq + phase * lyr.speed + lyr.shift);
+        const amp = Math.pow(val, 1.02) * maxAmp * taperEnvelope(u) * swell;
+        topPts.push([x, -amp]);
+        botPts.push([x, amp * 0.76]);
+      }
+
+      oCtx.beginPath();
+      drawSmoothCurve(oCtx, topPts);
+      for (let i = botPts.length - 1; i >= 0; i--) {
+        oCtx.lineTo(botPts[i][0], botPts[i][1]);
+      }
+      oCtx.closePath();
+      oCtx.fillStyle = rgbStr(lyr.col, lyr.alpha);
+      oCtx.fill();
+
+      oCtx.lineCap = 'round';
+      oCtx.lineJoin = 'round';
+      oCtx.strokeStyle = rgbStr(lerpColor(lyr.col, [255, 255, 255], 0.28), lyr.strokeA);
+      oCtx.lineWidth = Math.max(2.0, 2.8 * scaleFactor);
+      oCtx.beginPath();
+      drawSmoothCurve(oCtx, topPts);
+      oCtx.stroke();
+    }
+  } else if (style === 'dj_pulse_horizon') {
+    // 19. DJ Sub-Bass Pulse Horizon (wide liquid dome with mirrored lake shimmer)
+    const pts = 90;
+    const maxAmp = h * 0.18;
+    const phase = framePhase * 0.032;
+    const upper: Array<[number, number]> = [];
+    const lower: Array<[number, number]> = [];
+
+    for (let i = 0; i < pts; i++) {
+      const u = i / (pts - 1);
+      const x = xStart + u * spanW;
+      const val = sampleMusicalSpec(specCol, u, true);
+      const flow = 0.88 + 0.12 * Math.cos(u * Math.PI * 4.0 - phase);
+      const dome = Math.pow(val, 1.03) * maxAmp * taperEnvelope(u) * flow;
+      upper.push([x, -dome]);
+      lower.push([x, dome * 0.45]);
+    }
+
+    const skyGrad = oCtx.createLinearGradient(0, -maxAmp, 0, 0);
+    skyGrad.addColorStop(0, rgbStr(c1, 0.82));
+    skyGrad.addColorStop(0.5, rgbStr(cMid, 0.46));
+    skyGrad.addColorStop(1, rgbStr(c2, 0.08));
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    drawSmoothCurve(oCtx, upper);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.closePath();
+    oCtx.fillStyle = skyGrad;
+    oCtx.fill();
+
+    const waterGrad = oCtx.createLinearGradient(0, 0, 0, maxAmp * 0.45);
+    waterGrad.addColorStop(0, rgbStr(cMid, 0.38));
+    waterGrad.addColorStop(1, rgbStr(c2, 0.02));
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    drawSmoothCurve(oCtx, lower);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.closePath();
+    oCtx.fillStyle = waterGrad;
+    oCtx.fill();
+
+    oCtx.lineCap = 'round';
+    oCtx.lineJoin = 'round';
+    oCtx.strokeStyle = makeSpanGrad(0.98);
+    oCtx.lineWidth = Math.max(2.6, 3.8 * scaleFactor);
+    oCtx.beginPath();
+    drawSmoothCurve(oCtx, upper);
+    oCtx.stroke();
+
+    // Horizon glow line
+    const hGrad = oCtx.createLinearGradient(xStart, 0, xEnd, 0);
+    hGrad.addColorStop(0, rgbStr(c1, 0));
+    hGrad.addColorStop(0.15, rgbStr(c1, 0.9));
+    hGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+    hGrad.addColorStop(0.85, rgbStr(c2, 0.9));
+    hGrad.addColorStop(1, rgbStr(c2, 0));
+    oCtx.strokeStyle = hGrad;
+    oCtx.lineWidth = Math.max(2.0, 2.8 * scaleFactor);
+    oCtx.beginPath();
+    oCtx.moveTo(xStart, 0);
+    oCtx.lineTo(xEnd, 0);
+    oCtx.stroke();
+  } else if (style === 'dj_vinyl_arc') {
+    // 20. DJ Vinyl Groove Ribbon Arcs (sweeping fluid stereo ribbons with luminous beads)
+    const pts = 80;
+    const maxAmp = h * 0.145;
+    const phase = framePhase * 0.04;
+    const strands = [
+      { mult: 1.0, phaseOff: 0.0, bandShift: 0.0, col: c1, lw: 3.4 },
+      { mult: 0.78, phaseOff: 1.35, bandShift: 0.22, col: cMid, lw: 2.8 },
+      { mult: 0.62, phaseOff: 2.7, bandShift: 0.45, col: c2, lw: 2.4 },
+    ];
+
+    for (let sIdx = 0; sIdx < strands.length; sIdx++) {
+      const sCfg = strands[sIdx];
+      const coords: Array<[number, number]> = [];
+      for (let i = 0; i < pts; i++) {
+        const u = i / (pts - 1);
+        const x = xStart + u * spanW;
+        const bandU = Math.min(0.95, u * 0.52 + sCfg.bandShift);
+        const val = sampleSpec(specCol, bandU);
+        const carrier = Math.sin(u * Math.PI * 3.5 + phase + sCfg.phaseOff);
+        const y = carrier * Math.pow(val, 1.02) * maxAmp * sCfg.mult * taperEnvelope(u);
+        coords.push([x, y]);
+      }
+
+      oCtx.lineCap = 'round';
+      oCtx.lineJoin = 'round';
+      oCtx.strokeStyle = rgbStr(sCfg.col, 0.92);
+      oCtx.lineWidth = Math.max(2.0, sCfg.lw * scaleFactor);
+      oCtx.beginPath();
+      drawSmoothCurve(oCtx, coords);
+      oCtx.stroke();
+
+      // Subtle glowing groove beads along the primary strand
+      if (sIdx === 0) {
+        const beadCol = lerpColor(c1, [255, 255, 255], 0.52);
+        oCtx.fillStyle = rgbStr(beadCol, 0.92);
+        for (let b = 4; b < coords.length - 4; b += 7) {
+          oCtx.beginPath();
+          oCtx.arc(coords[b][0], coords[b][1], Math.max(2.2, 3.6 * scaleFactor), 0, Math.PI * 2);
+          oCtx.fill();
+        }
+      }
+    }
   }
 
   oCtx.restore();
@@ -882,13 +1168,13 @@ export function renderStudioFrame(
   gCtx.drawImage(overlayCanvas, 0, 0, glowCanvas.width, glowCanvas.height);
   gCtx.restore();
 
-  // Layer 3B: Medium Soft Neon Halo (workCanvas)
+  // Layer 3B: Medium Soft Neon Halo (workCanvas - half-res for 4x faster GPU/CPU blur)
   const wCtx = workCanvas.getContext('2d')!;
-  wCtx.clearRect(0, 0, w, h);
+  wCtx.clearRect(0, 0, workCanvas.width, workCanvas.height);
   wCtx.save();
-  const medBlurPx = Math.max(2, Math.round(11 * scaleFactor));
+  const medBlurPx = Math.max(2, Math.round(11 * (workCanvas.width / w) * scaleFactor));
   wCtx.filter = `blur(${medBlurPx}px)`;
-  wCtx.drawImage(overlayCanvas, 0, 0, w, h);
+  wCtx.drawImage(overlayCanvas, 0, 0, workCanvas.width, workCanvas.height);
   wCtx.restore();
 
   targetCtx.save();
